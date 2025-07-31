@@ -1,0 +1,27 @@
+[project]
+name = "pixie"
+version = "0.1.0"
+description = "Tiny experimental LLM"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pandas>=2.3.1",
+    "pyarrow>=21.0.0",
+    "pydantic>=2.11.7",
+    "python-dotenv>=1.1.1",
+    "python-slugify>=8.0.4",
+    "pytorch-warmup>=0.2.0",
+    "sentencepiece>=0.2.0",
+    "simple-parsing>=0.1.7",
+    "toml>=0.10.2",
+    "torch>=2.7.1",
+    "transformers>=4.54.0",
+    "wandb>=0.21.0",
+]
+
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.uv]
+package = true
