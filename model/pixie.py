@@ -30,9 +30,16 @@ class MultiHeadAttention(nn.Module):
         self.num_kv_attention_heads = num_kv_attention_heads
         self.head_dim = hidden_size // num_attention_heads
         self.kv_rep = num_attention_heads // num_kv_attention_heads
-        self.wq = nn.Linear(hidden_size, num_attention_heads * self.head_dim)
-        self.wk = nn.Linear(hidden_size, num_kv_attention_heads * self.head_dim)
-        self.wv = nn.Linear(hidden_size, num_kv_attention_heads * self.head_dim)
+        self.wq = nn.Linear(
+            hidden_size, num_attention_heads * self.head_dim, bias=False
+        )
+        self.wk = nn.Linear(
+            hidden_size, num_kv_attention_heads * self.head_dim, bias=False
+        )
+        self.wv = nn.Linear(
+            hidden_size, num_kv_attention_heads * self.head_dim, bias=False
+        )
+        self.wo = nn.Linear(hidden_size, hidden_size, bias=False)
         self.dropout = dropout
 
     def repeat_kv(self, x: Tensor) -> Tensor:
@@ -90,6 +97,7 @@ class MultiHeadAttention(nn.Module):
             self.head_dim,
         )
         output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
+        output = self.wo(output)  # [batch_size, seq_len, hidden_size]
         return output  # [batch_size, seq_len, hidden_size]
 
 
