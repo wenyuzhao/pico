@@ -7,9 +7,11 @@ import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.generation.utils import GenerationMixin
 from transformers.modeling_utils import PreTrainedModel
-from transformers.configuration_utils import PretrainedConfig
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from model.config import Config
+
+
+type PositionEmbedding = tuple[Tensor, Tensor]
 
 
 class MultiHeadAttention(nn.Module):
@@ -45,7 +47,21 @@ class MultiHeadAttention(nn.Module):
             )
         )
 
-    def forward(self, x: Tensor) -> Tensor:
+    def apply_rotary_pos_emb(self, q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
+        def rotate_half(x):
+            return torch.cat(
+                (-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]), dim=-1
+            )
+
+        q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (
+            rotate_half(q) * sin.unsqueeze(unsqueeze_dim)
+        )
+        k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (
+            rotate_half(k) * sin.unsqueeze(unsqueeze_dim)
+        )
+        return q_embed, k_embed
+
+    def forward(self, x: Tensor, position_embedding: PositionEmbedding) -> Tensor:
         batch_size, seq_len, _hidden_size = x.shape
         q = self.wq(x)  # [batch_size, seq_len, num_attention_heads * self.head_dim]
         k, v = self.wk(x), self.wv(
@@ -55,6 +71,9 @@ class MultiHeadAttention(nn.Module):
         q = q.view(batch_size, seq_len, self.num_attention_heads, self.head_dim)
         k = k.view(batch_size, seq_len, self.num_kv_attention_heads, self.head_dim)
         v = v.view(batch_size, seq_len, self.num_kv_attention_heads, self.head_dim)
+        # Apply positional encoding
+        cos, sin = position_embedding
+        q, k = self.apply_rotary_pos_emb(q, k, cos[:seq_len], sin[:seq_len])
         # Repeat kv heads to match q heads: [batch_size, seq_len, num_attention_heads, head_dim]
         k, v = self.repeat_kv(k), self.repeat_kv(v)
         # transpose to [batch_size, num_attention_heads, seq_len, head_dim]
@@ -123,10 +142,13 @@ class TransformerBlock(nn.Module):
         self.input_norm = RMSNorm(hidden_size, eps=1e-5)
         self.attention_norm = RMSNorm(hidden_size, eps=1e-5)
 
-    def forward(self, x: Tensor):
+    def forward(self, x: Tensor, position_embedding: PositionEmbedding):
         x2 = x
         # Attention
-        x = self.attention(self.input_norm(x)) + x2
+        x = (
+            self.attention(self.input_norm(x), position_embedding=position_embedding)
+            + x2
+        )
         x = self.attention_norm(x)
         # Feed Forward
         x2 = x
@@ -144,11 +166,20 @@ class Transformer(nn.Module):
 
         # Embedding layer
         self.tok_emb = nn.Embedding(config.vocab_size, config.hidden_size)
-        self.pos_emb = nn.Embedding(config.context_length, config.hidden_size)
         self.dropout_emb = nn.Dropout(config.dropout)
+        # Positional encoding
+        cos, sin = self.precompute_freqs_cis(
+            dim=config.hidden_size // config.num_attention_heads,
+            end=config.context_length,
+            theta=config.rope_theta,
+        )
+        self.register_buffer("freqs_cos", cos, persistent=False)
+        self.register_buffer("freqs_sin", sin, persistent=False)
+        self.freqs_sin: Tensor
+        self.freqs_cos: Tensor
         # Transformer layers
-        self.layers = nn.Sequential(
-            *[
+        self.layers = nn.ModuleList(
+            [
                 TransformerBlock(
                     hidden_size=config.hidden_size,
                     num_attention_heads=config.num_attention_heads,
@@ -164,16 +195,29 @@ class Transformer(nn.Module):
         self.norm = RMSNorm(config.hidden_size, eps=1e-5)
         # Final linear layer
         self.out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.tok_emb.weight = self.out.weight
 
-    def forward(self, x: Tensor) -> Tensor:
+    def precompute_freqs_cis(self, dim: int, end: int, theta: float):
+        freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+        t = torch.arange(end, device=freqs.device)
+        freqs = torch.outer(t, freqs).float()
+        freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim=-1)
+        freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)
+        return freqs_cos, freqs_sin
+
+    def forward(self, x: Tensor, **args) -> Tensor:
         _batch_size, seq_len = x.shape
         # Embedding and positional encoding
         tok_embeds = self.tok_emb(x)  # [batch_size, seq_len, hidden_size]
-        pos_embeds = self.pos_emb(torch.arange(seq_len, device=x.device))
-        x = tok_embeds + pos_embeds
-        x = self.dropout_emb(x)  # [batch_size, seq_len, hidden_size]
+        x = self.dropout_emb(tok_embeds)  # [batch_size, seq_len, hidden_size]
         # Transformer layers
-        x = self.layers(x)  # [batch_size, seq_len, hidden_size]
+        start = 0
+        pos = (
+            self.freqs_cos[start : start + seq_len],
+            self.freqs_sin[start : start + seq_len],
+        )
+        for layer in self.layers:
+            x = layer(x, position_embedding=pos)  # [batch_size, seq_len, hidden_size]
         # Final normalization and linear layer
         x = self.norm(x)  # [batch_size, seq_len, hidden_size]
         logits = self.out(x)  # [batch_size, seq_len, hidden_size]
@@ -187,9 +231,9 @@ class Pixie(PreTrainedModel, GenerationMixin):
         self.config = config or Config()
         super().__init__(self.config)
         self.model = Transformer(self.config)
+        self.out = CausalLMOutputWithPast()
         if compile:
             self.model = torch.compile(self.model, mode="default")
-        self.out = CausalLMOutputWithPast()
 
     def forward(self, input_ids: Tensor, **args) -> CausalLMOutputWithPast:
         logits = self.model(input_ids)

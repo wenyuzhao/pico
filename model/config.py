@@ -16,7 +16,8 @@ class Config(PretrainedConfig):
         num_attention_heads: int = 8,
         num_kv_attention_heads: int = 2,
         dropout: float = 0.0,
-        feed_forward_size: int = 1408,  # type: ignore
+        feed_forward_size: int = 1408,
+        rope_theta: float = 1e6,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -29,6 +30,7 @@ class Config(PretrainedConfig):
         self.num_kv_attention_heads = num_kv_attention_heads
         self.dropout = dropout
         self.feed_forward_size = feed_forward_size
+        self.rope_theta = rope_theta
 
         tok = AutoTokenizer.from_pretrained(self.tokenizer)
         assert isinstance(tok, PreTrainedTokenizerFast)
