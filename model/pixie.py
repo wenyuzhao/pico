@@ -157,10 +157,8 @@ class TransformerBlock(nn.Module):
             self.attention(self.input_norm(x), position_embedding=position_embedding)
             + x2
         )
-        x = self.attention_norm(x)
         # Feed Forward
-        x2 = x
-        x = self.feed_forward(x) + x2
+        x = x + self.feed_forward(self.attention_norm(x))
         return x
 
 

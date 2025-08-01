@@ -3,6 +3,7 @@ from pathlib import Path
 import time
 import warnings
 from simple_parsing import ArgumentParser
+from slugify import slugify
 import torch
 from torch import optim
 from torch.utils.data import DataLoader
@@ -15,6 +16,7 @@ import uuid
 import torch.nn.functional as F
 from simple_parsing.helpers import flag, field
 import pytorch_warmup as warmup
+import git
 
 dotenv.load_dotenv()
 
@@ -35,7 +37,7 @@ class TrainingConfig:
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype: str = "bfloat16" if torch.cuda.is_available() else "float32"
     wandb: bool = flag(default=False)
-    wandb_project: str = Model.NAME
+    wandb_project: str = "pixie"
     accumulation_steps: int = 8
     grad_clip: float = 1.0
     log_interval: int = 100
@@ -63,7 +65,17 @@ class TrainingConfig:
 
 class Trainer:
     def __init__(self, args: TrainingConfig):
-        self.runid = time.strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())[:8]
+        self.runid = Model.NAME
+        # get git branch name
+        try:
+            repo = git.Repo(search_parent_directories=True)
+            branch = repo.active_branch.name
+            if branch != "main":
+                branch = slugify(branch)
+                self.runid += f"-{branch}"
+        except Exception as e:
+            ...
+        self.runid += "-" + time.strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())[:8]
         self.args = args
         self.save_dir = Path(args.out_dir) / "pretrain" / self.runid
         self.save_dir.mkdir(parents=True, exist_ok=True)
