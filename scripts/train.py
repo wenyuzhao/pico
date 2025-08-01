@@ -47,6 +47,8 @@ class TrainingConfig:
     data_path: str = DEFAULT_DATASET
     checkpoint: str | None = field(alias="ckpt", default=None)
     """Path to the checkpoint file to continue training from."""
+    max_steps: int | None = None
+    name: str | None = None
 
     def __post_init__(self):
         self.max_seq_len = self.max_seq_len or Config().context_length
@@ -71,11 +73,12 @@ class Trainer:
             repo = git.Repo(search_parent_directories=True)
             branch = repo.active_branch.name
             if branch != "main":
-                branch = slugify(branch)
-                self.runid += f"-{branch}"
+                self.runid += f"-{slugify(branch)}"
         except Exception as e:
             ...
-        self.runid += "-" + time.strftime("%Y%m%d-%H%M%S") + "-" + str(uuid.uuid4())[:8]
+        if args.name is not None:
+            self.runid += "-" + slugify(args.name)
+        self.runid += "-" + time.strftime("%Y%m%d-%H%M%S")
         self.args = args
         self.save_dir = Path(args.out_dir) / "pretrain" / self.runid
         self.save_dir.mkdir(parents=True, exist_ok=True)
@@ -228,6 +231,11 @@ class Trainer:
                     - spend_time // 60
                 )
                 self.log(epoch, step, _loss, _lr, _epoch_time)
+                if (
+                    self.args.max_steps
+                    and step / self.args.log_interval >= self.args.max_steps
+                ):
+                    break
         self.save_model(epoch=epoch)
 
     def save_model(self, epoch: int | None = None, final: bool = False):
