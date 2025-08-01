@@ -102,9 +102,7 @@ class Trainer:
                 **self.config.to_dict(),
                 "runid": self.runid,
             }
-            wandb.init(
-                project=args.wandb_project, name=f"{Model.NAME}-base", config=config
-            )
+            wandb.init(project=args.wandb_project, name=self.runid, config=config)
         # Initialize model, tokenizer, and data loader
         self.model, self.tokenizer = self.init_model()
         self.data_loader = self.init_data_loader()
