@@ -82,6 +82,11 @@ class Trainer:
         self.args = args
         self.save_dir = Path(args.out_dir) / "pretrain" / self.runid
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        # Link the save directory to out/pretrain/latest
+        latest_link = Path(args.out_dir) / "pretrain" / "latest"
+        if latest_link.exists():
+            latest_link.unlink()
+        latest_link.symlink_to(self.save_dir, target_is_directory=True)
         # Get model configs
         if args.checkpoint is not None:
             prev_cfg = Path(args.checkpoint) / "pretrain" / self.runid / "config.json"
