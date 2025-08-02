@@ -42,18 +42,6 @@ class MultiHeadAttention(nn.Module):
         self.wo = nn.Linear(hidden_size, hidden_size, bias=False)
         self.dropout = dropout
 
-    def repeat_kv(self, x: Tensor) -> Tensor:
-        batch_size, seq_len, num_kv_attention_heads, head_dim = x.shape
-        if self.kv_rep == 1:
-            return x
-        return (
-            x[:, :, :, None, :]
-            .expand(batch_size, seq_len, num_kv_attention_heads, self.kv_rep, head_dim)
-            .reshape(
-                batch_size, seq_len, num_kv_attention_heads * self.kv_rep, head_dim
-            )
-        )
-
     def apply_rotary_pos_emb(self, q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
         def rotate_half(x):
             return torch.cat(
@@ -81,10 +69,11 @@ class MultiHeadAttention(nn.Module):
         # Apply positional encoding
         cos, sin = position_embedding
         q, k = self.apply_rotary_pos_emb(q, k, cos[:seq_len], sin[:seq_len])
-        # Repeat kv heads to match q heads: [batch_size, seq_len, num_attention_heads, head_dim]
-        k, v = self.repeat_kv(k), self.repeat_kv(v)
-        # transpose to [batch_size, num_attention_heads, seq_len, head_dim]
+        # transpose to [batch_size, num_attention_heads or num_kv_attention_heads, seq_len, head_dim]
         q, k, v = (a.transpose(1, 2) for a in (q, k, v))
+        # Repeat kv heads to match q heads: [batch_size, seq_len, num_attention_heads, head_dim]
+        k = k.repeat_interleave(self.kv_rep, -3)
+        v = v.repeat_interleave(self.kv_rep, -3)
         # Apply scaled dot-product attention
         dropout_p = self.dropout if self.training else 0.0
         output = F.scaled_dot_product_attention(
