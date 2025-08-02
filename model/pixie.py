@@ -66,7 +66,7 @@ class MultiHeadAttention(nn.Module):
         k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (
             rotate_half(k) * sin.unsqueeze(unsqueeze_dim)
         )
-        return q_embed, k_embed
+        return q_embed.type_as(q), k_embed.type_as(k)
 
     def forward(self, x: Tensor, position_embedding: PositionEmbedding) -> Tensor:
         batch_size, seq_len, _hidden_size = x.shape
@@ -84,7 +84,7 @@ class MultiHeadAttention(nn.Module):
         # Repeat kv heads to match q heads: [batch_size, seq_len, num_attention_heads, head_dim]
         k, v = self.repeat_kv(k), self.repeat_kv(v)
         # transpose to [batch_size, num_attention_heads, seq_len, head_dim]
-        q, k, v = (x.transpose(1, 2) for x in (q, k, v))
+        q, k, v = (a.transpose(1, 2) for a in (q, k, v))
         # Apply scaled dot-product attention
         dropout_p = self.dropout if self.training else 0.0
         output = F.scaled_dot_product_attention(
@@ -96,7 +96,7 @@ class MultiHeadAttention(nn.Module):
             seq_len,
             self.head_dim,
         )
-        output = output.transpose(1, 2).reshape(batch_size, seq_len, -1)
+        output = output.transpose(1, 2).contiguous().reshape(batch_size, seq_len, -1)
         output = self.wo(output)  # [batch_size, seq_len, hidden_size]
         return output  # [batch_size, seq_len, hidden_size]
 
@@ -120,7 +120,7 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         return self.dropout(
-            self.down_proj(self.act(self.up_proj(x)) * self.gate_proj(x))
+            self.down_proj(self.act(self.gate_proj(x)) * self.up_proj(x))
         )
 
 
@@ -176,7 +176,7 @@ class Transformer(nn.Module):
         # Positional encoding
         cos, sin = self.precompute_freqs_cis(
             dim=config.hidden_size // config.num_attention_heads,
-            end=config.context_length,
+            end=32768,
             theta=config.rope_theta,
         )
         self.register_buffer("freqs_cos", cos, persistent=False)

@@ -130,6 +130,7 @@ def complete_streamed(tokenizer: PreTrainedTokenizerFast, model: Pixie, args: Ar
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
             streamer=streamer,
+            use_cache=False,
         )
 
     Thread(target=_generate).start()
