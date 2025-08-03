@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 import time
+from typing import Literal
 import warnings
 from simple_parsing import ArgumentParser
 from slugify import slugify
@@ -9,7 +10,8 @@ from torch import optim
 from torch.utils.data import DataLoader
 from contextlib import nullcontext
 from model.pixie import Pixie as Model, Config
-from scripts.dataset import PretrainDataset
+from scripts.dataset import PretrainDataset, SFTDataset
+from torch.utils.data import Dataset
 import wandb
 import dotenv
 import uuid
@@ -22,8 +24,17 @@ dotenv.load_dotenv()
 
 warnings.filterwarnings("ignore")
 
-DEFAULT_DATASET: str = "datasets/fineweb-edu"
-DATASET_HAS_SPECIAL_TOKENS: bool = False
+
+@dataclass
+class TrainDataset:
+    path: str
+    has_special_tokens: bool = False
+
+
+DATASET = {
+    "pretrain": TrainDataset(path="datasets/fineweb-edu"),
+    "sft": TrainDataset(path="datasets/ultrachat_200k"),
+}
 
 
 @dataclass
@@ -37,32 +48,34 @@ class TrainingConfig:
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype: str = "bfloat16" if torch.cuda.is_available() else "float32"
     wandb: bool = flag(default=False)
-    wandb_project: str = "pixie"
+    wandb_project_prefix: str = "pixie"
     accumulation_steps: int = 8
     grad_clip: float = 1.0
     log_interval: int = 100
     warmup_period: int | None = 400
     max_seq_len: int | None = None
     """Maximum sequence length for training. If None, uses the model's context length."""
-    data_path: str = DEFAULT_DATASET
     checkpoint: str | None = field(alias="ckpt", default=None)
     """Path to the checkpoint file to continue training from."""
     max_steps: int | None = None
     name: str | None = None
+    type: Literal["base", "sft"] = "base"
 
     def __post_init__(self):
         self.max_seq_len = self.max_seq_len or Config().context_length
         if self.checkpoint is not None:
             ckpt_path = Path(self.checkpoint)
             segments = ckpt_path.name.split("-")
-            assert (
-                len(segments) > 1 and segments[-1].isdigit()
-            ), "Checkpoint name must end with a number indicating the epoch."
-            self.checkpoint_epoch = int(segments[-1])
+            if len(segments) > 1 and segments[-1].isdigit():
+                self.checkpoint_epoch = int(segments[-1])
+            else:
+                self.checkpoint_epoch = None
             self.checkpoint_runid = ckpt_path.parent.name
         else:
             self.checkpoint_epoch = None
             self.checkpoint_runid = None
+        if self.type != "base":
+            assert self.checkpoint is not None
 
 
 class Trainer:
@@ -80,11 +93,18 @@ class Trainer:
             self.runid += "-" + slugify(args.name)
         self.runid += "-" + time.strftime("%Y%m%d-%H%M%S")
         self.args = args
-        self.save_dir = Path(args.out_dir) / "pretrain" / self.runid
+        match args.type:
+            case "base":
+                self.type = "pretrain"
+            case "sft":
+                self.type = "sft"
+            case _:
+                raise ValueError(f"Unknown model type: {args.type}")
+        self.save_dir = Path(args.out_dir) / self.type / self.runid
         self.save_dir.mkdir(parents=True, exist_ok=True)
         # Get model configs
         if args.checkpoint is not None:
-            prev_cfg = Path(args.checkpoint) / "pretrain" / self.runid / "config.json"
+            prev_cfg = Path(args.checkpoint).parent / "config.json"
             assert prev_cfg.exists(), "Previous config file not found."
             self.config = Config.from_pretrained(prev_cfg)
             print(f"Loaded config from {prev_cfg}")
@@ -105,7 +125,11 @@ class Trainer:
                 **self.config.to_dict(),
                 "runid": self.runid,
             }
-            wandb.init(project=args.wandb_project, name=self.runid, config=config)
+            wandb.init(
+                project=args.wandb_project_prefix + "-" + self.type,
+                name=self.runid,
+                config=config,
+            )
         # Initialize model, tokenizer, and data loader
         self.model, self.tokenizer = self.init_model()
         self.data_loader = self.init_data_loader()
@@ -137,23 +161,36 @@ class Trainer:
             f"Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} M"
         )
         if self.args.checkpoint is not None:
-            assert self.args.checkpoint_epoch is not None
             model.load_state_dict(
                 torch.load(self.args.checkpoint, map_location=self.args.device),
                 strict=True,
             )
-            print(
-                f"Loaded checkpoint from {self.args.checkpoint} (epoch: {self.args.checkpoint_epoch})"
-            )
+            if self.args.checkpoint_epoch is not None:
+                print(
+                    f"Loaded checkpoint from {self.args.checkpoint} (epoch: {self.args.checkpoint_epoch})"
+                )
+            else:
+                print(f"Loaded checkpoint from {self.args.checkpoint}")
         return model, tokenizer
 
     def init_data_loader(self):
-        train_ds = PretrainDataset(
-            self.args.data_path,
-            self.tokenizer,
-            max_length=self.args.max_seq_len or self.config.context_length,
-            add_special_tokens=not DATASET_HAS_SPECIAL_TOKENS,
-        )
+        ds_config = DATASET[self.type]
+        train_ds: Dataset
+        if self.type == "pretrain":
+            train_ds = PretrainDataset(
+                ds_config.path,
+                self.tokenizer,
+                max_length=self.args.max_seq_len or self.config.context_length,
+                add_special_tokens=not ds_config.has_special_tokens,
+            )
+        elif self.type == "sft":
+            train_ds = SFTDataset(
+                ds_config.path,
+                self.tokenizer,
+                max_length=self.args.max_seq_len or self.config.context_length,
+            )
+        else:
+            raise ValueError(f"Unknown model type: {self.type}")
         return DataLoader(
             train_ds,
             batch_size=self.args.batch_size,
@@ -241,11 +278,11 @@ class Trainer:
     def save_model(self, epoch: int | None = None, final: bool = False):
         self.model.eval()
         if epoch is not None:
-            ckp = self.save_dir / f"{Model.NAME}-base-{epoch}.pth"
+            ckp = self.save_dir / f"{Model.NAME}-{self.args.type}-{epoch}.pth"
         elif final:
-            ckp = self.save_dir / f"{Model.NAME}-base.pth"
+            ckp = self.save_dir / f"{Model.NAME}-{self.args.type}.pth"
         else:
-            ckp = self.save_dir / f"{Model.NAME}-base.pth"
+            ckp = self.save_dir / f"{Model.NAME}-{self.args.type}.pth"
 
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             state_dict = self.model.module.state_dict()
