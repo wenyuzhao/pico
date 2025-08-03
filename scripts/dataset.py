@@ -228,9 +228,6 @@ class SFTDataset(Dataset):
         self.eos_id: int = tokenizer.eos_token_id  # type: ignore
         self.samples = self.load_data(data)
 
-    def __len__(self):
-        return len(self.samples)
-
     def load_data(self, path):
         def processor(df: pd.DataFrame) -> pd.DataFrame:
             col = "conversations" if "conversations" in df.columns else "messages"
@@ -258,7 +255,6 @@ class SFTDataset(Dataset):
                 truncation=True,
                 return_tensors="pt",
                 add_special_tokens=True,
-                return_overflowing_tokens=True,
             )
             for input_ids, attention_mask in zip(
                 encoding.input_ids, encoding.attention_mask
@@ -276,6 +272,9 @@ class SFTDataset(Dataset):
         )
         print(f"Including filtered {num_filtered} samples.")
         return pd.DataFrame(tokenized_samples)
+
+    def __len__(self):
+        return len(self.samples)
 
     def __getitem__(self, index: int):
         sample = self.samples.iloc[index]

@@ -33,7 +33,7 @@ class TrainDataset:
 
 DATASET = {
     "pretrain": TrainDataset(path="datasets/fineweb-edu"),
-    "sft": TrainDataset(path="datasets/ultrachat_200k"),
+    "sft": TrainDataset(path="datasets/magpie-llama3.1-300k"),
 }
 
 
