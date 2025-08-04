@@ -18,7 +18,6 @@ def load_and_preprocess(
 ):
     paths = [Path(path)] if isinstance(path, (Path, str)) else [Path(p) for p in path]
     for p in paths:
-        assert p.is_dir(), f"Path {p} is not a directory."
         if p.is_dir():
             precomputed = p / f".{tokenizer}-{size}.tokens.parquet"
             if precomputed.exists():
@@ -52,7 +51,7 @@ def load_and_preprocess(
             ], f"Unsupported file type: {p.suffix}"
             s = str(p).lower()
             if s.endswith((".parquet", ".jsonl")) and not s.endswith(".tokens.parquet"):
-                precomputed = p.with_suffix(".tokens.parquet")
+                precomputed = p.with_suffix(f".{tokenizer}-{size}.tokens.parquet")
                 if precomputed.exists():
                     continue
                 if p.suffix.lower() == ".parquet":
@@ -75,7 +74,6 @@ def load_precomputed(
     paths = [Path(path)] if isinstance(path, (Path, str)) else [Path(p) for p in path]
     files: list[pd.DataFrame] = []
     for p in paths:
-        assert p.is_dir(), f"Path {p} is not a directory."
         if p.is_dir():
             precomputed = p / f".{tokenizer}-{size}.tokens.parquet"
             assert precomputed.exists()
@@ -108,7 +106,7 @@ def create_chat_prompt(
     records: list[np.ndarray[dict[str, str]]] = (  # type: ignore
         [conversations] if isinstance(conversations[0], dict) else conversations
     )
-    records: list[list[dict[str, str]]] = [r.tolist() for r in records]  # type: ignore
+    records: list[list[dict[str, str]]] = [r.tolist() if not isinstance(r, list) else r for r in records]  # type: ignore
     # Fix record keys
     for msgs in records:
         for x in msgs:
