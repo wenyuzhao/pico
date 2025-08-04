@@ -13,6 +13,7 @@ from typing import Generator, Literal
 from slugify import slugify
 from transformers import AutoTokenizer
 import duckdb
+import time
 
 
 class DuckDBDataset(Dataset):
@@ -88,7 +89,7 @@ class DuckDBDataset(Dataset):
         return X, Y, loss_mask
 
 
-BATCH_SIZE = 50000
+BATCH_SIZE = 20000
 
 
 @dataclass
@@ -170,7 +171,7 @@ def process_pretrain_data(
         )
     # Do it batched
     for i in range(0, len(samples), BATCH_SIZE):
-        print(f"       . {i} / {len(samples)}")
+        print(f"       . {i} / {len(samples)}", flush=True)
         max_index = min(i + BATCH_SIZE, len(samples))
         slice = samples[i:max_index].to_list()
         if len(slice) == 0:
@@ -209,7 +210,7 @@ def process_sft_data(
     samples = create_chat_prompt(conversations, tok)
     # Do it batched
     for i in range(0, len(samples), BATCH_SIZE):
-        print(f"{i} / {len(samples)}")
+        print(f"       . {i} / {len(samples)}", flush=True)
         max_index = min(i + BATCH_SIZE, len(samples))
         slice = samples[i:max_index]
         encoding = tok(
@@ -320,12 +321,12 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
         max_len = cfg.max_length
         create_database(conn, max_len)
         # 1. find out all files in the database
-        print(f"1. Collecting files in the database ...")
+        print(f"1. Collecting files in the database ...", flush=True)
         all_files_in_db = conn.execute("SELECT DISTINCT file FROM dataset").fetchall()
         all_files_in_db = {Path(row[0]) for row in all_files_in_db}
-        print(f"1. Found {len(all_files_in_db)} files in the database.")
+        print(f"1. Found {len(all_files_in_db)} files in the database.", flush=True)
         # 2. find out all files in the directory
-        print(f"2. Collecting files ...")
+        print(f"2. Collecting files ...", flush=True)
         all_files_collected = set()
         if data_path.is_dir():
             for f in data_path.glob("**/*"):
@@ -334,52 +335,80 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
         else:
             assert data_path.exists(), "Path must be a file or directory."
             all_files_collected = {data_path.resolve().relative_to(PROJECT_ROOT)}
-        print(f"2. Found {len(all_files_collected)} files to process.")
+        print(f"2. Found {len(all_files_collected)} files to process.", flush=True)
         # 3. Process files that are not in the database
-        print(f"3. Processing files ...")
+        print(f"3. Processing files ...", flush=True)
         to_process = all_files_collected - all_files_in_db
         samples, tokens = 0, 0
         sorted_to_process = sorted(to_process, key=lambda x: str(x))
         for i, f in enumerate(sorted_to_process):
-            print(f"    - ADD {f} ({i + 1} / {len(sorted_to_process)})")
+            print(f"    - ADD {f} ({i + 1} / {len(sorted_to_process)})", flush=True)
             file_samples, file_tokens = process_file(PROJECT_ROOT / f, conn)
             samples += file_samples
             tokens += file_tokens
-            print(f"    - DONE. samples: {file_samples}, tokens: {file_tokens}")
+            print(
+                f"    - DONE. samples: {file_samples}, tokens: {file_tokens}",
+                flush=True,
+            )
         print(
-            f"3. Processed {len(to_process)} files, total samples: {samples}, total tokens: {tokens}"
+            f"3. Processed {len(to_process)} files, total samples: {samples}, total tokens: {tokens}",
+            flush=True,
         )
         # 4. Remove files that are in the database but not in the collected files
-        print(f"4. Removing dangling files in the database ...")
+        print(f"4. Removing dangling files in the database ...", flush=True)
         to_remove = all_files_in_db - all_files_collected
         for f in to_remove:
             conn.execute("DELETE FROM dataset WHERE file = ?", (str(f),))
-        print(f"4. Removed {len(to_remove)} files from the database.")
+        print(f"4. Removed {len(to_remove)} files from the database.", flush=True)
         # 5. Display current total samples and tokens in the database
         result = conn.execute("SELECT COUNT(*), SUM(tokens) FROM dataset").fetchone()
         total_samples, total_tokens = result if result else (0, 0)
-        print(f"\nDatabase Stats: {total_samples}")
-        print(f"  Files: {len(all_files_collected)}")
-        print(f"  Samples: {total_samples}")
-        print(f"  Tokens: {total_tokens} ({total_tokens / 1e9:.3f} B)")
+        print(f"\nDatabase Stats: {total_samples}", flush=True)
+        print(f"  Files: {len(all_files_collected)}", flush=True)
+        print(f"  Samples: {total_samples}", flush=True)
+        print(f"  Tokens: {total_tokens} ({total_tokens / 1e9:.3f} B)", flush=True)
 
 
 def force_delete_from_db(db: Path, files: list[Path]):
     with duckdb.connect(db) as conn:
         for f in files:
             f = f.resolve().relative_to(PROJECT_ROOT)
-            print(f"Deleting {f} from database ...")
+            print(f"Deleting {f} from database ...", flush=True)
             conn.execute("DELETE FROM dataset WHERE file = ?", (str(f),))
-    print(f"Deleted {len(files)} files from database {db}.")
+    print(f"Deleted {len(files)} files from database {db}.", flush=True)
+
+
+def show_dataset_stats(db: Path):
+    if db.suffix != ".db":
+        raise ValueError(f"Database file must have .db suffix, got {db.suffix}")
+    with duckdb.connect(db) as conn:
+        first = conn.execute("SELECT input_ids FROM dataset LIMIT 1").fetchone()
+        if not first:
+            print("Dataset is empty.", flush=True)
+            return
+        tokens_per_row = len(first[0])
+        result = conn.execute(
+            "SELECT COUNT(*), SUM(tokens), COUNT(DISTINCT file) FROM dataset"
+        ).fetchone()
+        if not result:
+            print("No records found in the dataset.", flush=True)
+            return
+        total_samples, total_tokens, total_files = result
+        print(f"Total samples: {total_samples}", flush=True)
+        print(f"Total tokens: {total_tokens} ({total_tokens / 1e9:.3f} B)", flush=True)
+        print(f"Total files: {total_files}", flush=True)
+        print(f"Tokens per sample: {tokens_per_row}", flush=True)
 
 
 def shuffle_dataset(db: Path):
     if db.suffix != ".db":
         raise ValueError(f"Database file must have .db suffix, got {db.suffix}")
+    start_time = time.time()
     with duckdb.connect(db) as conn:
         # Shuffle the dataset
         conn.execute("FROM dataset ORDER BY RANDOM()")
-    print(f"Shuffled dataset in {db}.")
+    elapsed_time = time.time() - start_time
+    print(f"Shuffled dataset in {db}, took {elapsed_time:.2f} seconds.", flush=True)
 
 
 def main():
@@ -406,6 +435,10 @@ def main():
     parser_shuffle = subparsers.add_parser("shuffle", help="Shuffle the dataset.")
     parser_shuffle.add_argument("db", type=str)
     parser_shuffle.set_defaults(func=shuffle_dataset)
+    # subparser: stats
+    parser_stats = subparsers.add_parser("stats", help="Show dataset statistics.")
+    parser_stats.add_argument("db", type=str)
+    parser_stats.set_defaults(func=show_dataset_stats)
     # parse and run
     args = parser.parse_args()
     if hasattr(args, "func"):
@@ -420,6 +453,8 @@ def main():
             force_delete_from_db(db_path, files)
         elif args.func == shuffle_dataset:
             shuffle_dataset(Path(args.db))
+        elif args.func == show_dataset_stats:
+            show_dataset_stats(Path(args.db))
 
 
 if __name__ == "__main__":
