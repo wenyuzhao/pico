@@ -1,6 +1,7 @@
 import argparse
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import numpy as np
 from torch.utils.data import Dataset
@@ -16,7 +17,11 @@ import duckdb
 
 class DuckDBDataset(Dataset):
     def __init__(
-        self, path: str | Path, tokenizer: PreTrainedTokenizerFast, max_length: int
+        self,
+        path: str | Path,
+        tokenizer: PreTrainedTokenizerFast,
+        max_length: int,
+        sample: int | None = None,
     ):
         super().__init__()
         self.tokenizer = tokenizer
@@ -35,18 +40,33 @@ class DuckDBDataset(Dataset):
 
         result = self.conn.execute("SELECT COUNT(*) FROM dataset").fetchone()
         assert result
-        self.len = result[0]
+        records = result[0]
+        if sample is not None:
+            if sample > records:
+                raise ValueError(
+                    f"Sample size {sample} is larger than the dataset size {records}."
+                )
+            # Count tokens
+            self.len = sample
+            r = self.conn.execute(
+                "SELECT COUNT(*) FROM dataset LIMIT ?", (sample,)
+            ).fetchone()
+            assert r, "No records found in the dataset."
+            print(f"Sampling {sample} records from the dataset ({r[0]} tokens).")
+        else:
+            self.len = records
+            r = self.conn.execute("SELECT COUNT(*) FROM dataset").fetchone()
+            assert r, "No records found in the dataset."
+            print(f"Using the entire dataset with {self.len} records ({r[0]} tokens).")
 
-        first_row = self.conn.execute(
-            "SELECT input_ids FROM dataset LIMIT 1"
-        ).fetchone()
-        if not first_row:
+        # verify vector length in the database
+        r = self.conn.execute("SELECT input_ids FROM dataset LIMIT 1").fetchone()
+        if not r:
             raise ValueError("Dataset is empty.")
-        tokens_per_row = len(first_row[0])
+        tokens_per_row = len(r[0])
         assert (
             tokens_per_row == self.max_length
         ), f"Expected {self.max_length} tokens per sample, got {tokens_per_row}."
-        self.tokens = tokens_per_row * self.len
 
     def __len__(self):
         result = self.conn.execute("SELECT COUNT(*) FROM dataset").fetchone()
@@ -119,7 +139,14 @@ def create_chat_prompt(
 def process_pretrain_data(
     df: pd.DataFrame, cfg: DatasetLoaderConfig
 ) -> Generator[pd.DataFrame]:
-    samples = df["text"]
+    possible_text_columns = ["text", "content"]
+    col_name: str | None = None
+    for col in possible_text_columns:
+        if col in df.columns:
+            col_name = col
+            break
+    assert col_name is not None, "No text column found in the DataFrame."
+    samples = df[col_name]
     tok = cfg._tokenizer
     if cfg.add_special_tokens:
         (bos, eos) = (tok.bos_token, tok.eos_token)
@@ -143,7 +170,7 @@ def process_pretrain_data(
         )
     # Do it batched
     for i in range(0, len(samples), BATCH_SIZE):
-        print(f"{i} / {len(samples)}")
+        print(f"       . {i} / {len(samples)}")
         max_index = min(i + BATCH_SIZE, len(samples))
         slice = samples[i:max_index].to_list()
         if len(slice) == 0:
@@ -218,6 +245,16 @@ def process_sft_data(
         yield df
 
 
+PROJECT_ROOT = Path(__file__).parent.parent
+assert (PROJECT_ROOT / "pyproject.toml").exists(), "Not in the project root."
+
+
+def create_database(conn: duckdb.DuckDBPyConnection, max_len: int):
+    conn.execute(
+        f"CREATE TABLE IF NOT EXISTS dataset (input_ids INTEGER[{max_len}], attention_mask INTEGER[{max_len}], file VARCHAR, tokens INTEGER)"
+    )
+
+
 def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "sft"]):
     data_path = Path(path)
     if not data_path.exists():
@@ -231,12 +268,18 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
         else:
             raise ValueError(f"Unsupported dataset type: {type}")
 
-    def insert_into_db(file: Path, df: pd.DataFrame, conn: duckdb.DuckDBPyConnection):
+    def insert_into_db(
+        file: Path, df: pd.DataFrame, conn: duckdb.DuckDBPyConnection
+    ) -> int:
+        file_path = file.resolve().relative_to(PROJECT_ROOT)
         df = df[["input_ids", "attention_mask"]]
         # Add file name to the DataFrame
-        df["file"] = [str(file)] * len(df)
+        df["file"] = [str(file_path)] * len(df)
+        df["tokens"] = df["input_ids"].apply(lambda x: int(np.count_nonzero(x)))
+        total_tokens = df["tokens"].sum()
         # Insert into database
         conn.execute("INSERT INTO dataset BY NAME SELECT * FROM df")
+        return int(total_tokens)
 
     def load_file(f: Path) -> pd.DataFrame:
         if f.suffix.lower() == ".parquet":
@@ -248,17 +291,23 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
                     if line := line.strip():
                         data.append(json.loads(line))
             return pd.DataFrame(data)
+        elif f.suffix.lower() == ".txt":
+            assert (
+                type == "pretrain"
+            ), "Text files can only be processed for pretraining."
+            # just read as a giant string
+            text = f.read_text(encoding="utf-8")
+            return pd.DataFrame({"text": [text]})
         else:
             raise ValueError(f"Unsupported file type: {f.suffix}")
 
-    def process_file(file: Path, conn: duckdb.DuckDBPyConnection) -> int:
-        print(f"Processing {file} ...")
+    def process_file(file: Path, conn: duckdb.DuckDBPyConnection) -> tuple[int, int]:
         df = load_file(file)
-        samples = 0
+        samples, tokens = 0, 0
         for seg in processor(df):
             samples += len(seg)
-            insert_into_db(file, seg, conn)
-        return samples
+            tokens += insert_into_db(file, seg, conn)
+        return samples, tokens
 
     # Open database
     db_name = f".{slugify(cfg.tokenizer)}-{cfg.max_length}.db"
@@ -266,51 +315,112 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
         db_path = data_path / db_name
     else:
         db_path = data_path.with_suffix(db_name)
-    # Remove existing database if it exists
-    if db_path.exists():
-        print(f"Removing existing database {db_path} ...")
-        db_path.unlink()
     with duckdb.connect(db_path) as conn:
+        # 0. Create the database and table if not exists
         max_len = cfg.max_length
-        conn.execute(
-            f"CREATE TABLE IF NOT EXISTS dataset (input_ids INTEGER[{max_len}], attention_mask INTEGER[{max_len}], file VARCHAR)"
-        )
-        samples = 0
-        # Load all jsonl or parquet
+        create_database(conn, max_len)
+        # 1. find out all files in the database
+        print(f"1. Collecting files in the database ...")
+        all_files_in_db = conn.execute("SELECT DISTINCT file FROM dataset").fetchall()
+        all_files_in_db = {Path(row[0]) for row in all_files_in_db}
+        print(f"1. Found {len(all_files_in_db)} files in the database.")
+        # 2. find out all files in the directory
+        print(f"2. Collecting files ...")
+        all_files_collected = set()
         if data_path.is_dir():
             for f in data_path.glob("**/*"):
-                if (
-                    f.is_file()
-                    and f.suffix.lower() in [".parquet", ".jsonl"]
-                    and not str(f).lower().endswith(".tokens.parquet")
-                ):
-                    samples += process_file(f, conn)
+                if f.is_file() and f.suffix.lower() in [".parquet", ".jsonl", ".txt"]:
+                    all_files_collected.add(f.resolve().relative_to(PROJECT_ROOT))
         else:
-            assert data_path.is_file(), "Path must be a file or directory."
-            assert data_path.suffix.lower() in [
-                ".parquet",
-                ".jsonl",
-            ], "Unsupported file type."
-            assert (
-                not str(data_path).lower().endswith(".tokens.parquet")
-            ), "Precomputed token files should not be processed here."
-            samples += process_file(data_path, conn)
-    print(f"Done. Processed {samples} samples.")
+            assert data_path.exists(), "Path must be a file or directory."
+            all_files_collected = {data_path.resolve().relative_to(PROJECT_ROOT)}
+        print(f"2. Found {len(all_files_collected)} files to process.")
+        # 3. Process files that are not in the database
+        print(f"3. Processing files ...")
+        to_process = all_files_collected - all_files_in_db
+        samples, tokens = 0, 0
+        sorted_to_process = sorted(to_process, key=lambda x: str(x))
+        for i, f in enumerate(sorted_to_process):
+            print(f"    - ADD {f} ({i + 1} / {len(sorted_to_process)})")
+            file_samples, file_tokens = process_file(PROJECT_ROOT / f, conn)
+            samples += file_samples
+            tokens += file_tokens
+            print(f"    - DONE. samples: {file_samples}, tokens: {file_tokens}")
+        print(
+            f"3. Processed {len(to_process)} files, total samples: {samples}, total tokens: {tokens}"
+        )
+        # 4. Remove files that are in the database but not in the collected files
+        print(f"4. Removing dangling files in the database ...")
+        to_remove = all_files_in_db - all_files_collected
+        for f in to_remove:
+            conn.execute("DELETE FROM dataset WHERE file = ?", (str(f),))
+        print(f"4. Removed {len(to_remove)} files from the database.")
+        # 5. Display current total samples and tokens in the database
+        result = conn.execute("SELECT COUNT(*), SUM(tokens) FROM dataset").fetchone()
+        total_samples, total_tokens = result if result else (0, 0)
+        print(f"\nDatabase Stats: {total_samples}")
+        print(f"  Files: {len(all_files_collected)}")
+        print(f"  Samples: {total_samples}")
+        print(f"  Tokens: {total_tokens} ({total_tokens / 1e9:.3f} B)")
+
+
+def force_delete_from_db(db: Path, files: list[Path]):
+    with duckdb.connect(db) as conn:
+        for f in files:
+            f = f.resolve().relative_to(PROJECT_ROOT)
+            print(f"Deleting {f} from database ...")
+            conn.execute("DELETE FROM dataset WHERE file = ?", (str(f),))
+    print(f"Deleted {len(files)} files from database {db}.")
+
+
+def shuffle_dataset(db: Path):
+    if db.suffix != ".db":
+        raise ValueError(f"Database file must have .db suffix, got {db.suffix}")
+    with duckdb.connect(db) as conn:
+        # Shuffle the dataset
+        conn.execute("FROM dataset ORDER BY RANDOM()")
+    print(f"Shuffled dataset in {db}.")
+
+
+def main():
+    os.environ["PYTHONUNBUFFERED"] = "1"
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers()
+    # subparser: process
+    parser_process = subparsers.add_parser("process", help="Process dataset files.")
+    parser_process.add_argument("path", type=str)
+    parser_process.add_argument(
+        "--type", type=str, choices=["pretrain", "sft"], default="pretrain"
+    )
+    parser_process.add_argument(
+        "--tokenizer", type=str, default="jingyaogong/MiniMind2"
+    )
+    parser_process.add_argument("--max_length", type=int, default=1024)
+    parser_process.set_defaults(func=preprocess)
+    # subparser: remove
+    parser_remove = subparsers.add_parser("remove")
+    parser_remove.add_argument("db", type=str)
+    parser_remove.add_argument("--files", "-f", type=str, nargs="+")
+    parser_remove.set_defaults(func=force_delete_from_db)
+    # subparser: shuffle
+    parser_shuffle = subparsers.add_parser("shuffle", help="Shuffle the dataset.")
+    parser_shuffle.add_argument("db", type=str)
+    parser_shuffle.set_defaults(func=shuffle_dataset)
+    # parse and run
+    args = parser.parse_args()
+    if hasattr(args, "func"):
+        if args.func == preprocess:
+            cfg = DatasetLoaderConfig(
+                tokenizer=args.tokenizer, max_length=args.max_length, type=args.type
+            )
+            preprocess(args.path, cfg, args.type)
+        elif args.func == force_delete_from_db:
+            db_path = Path(args.db)
+            files = [Path(f) for f in args.files]
+            force_delete_from_db(db_path, files)
+        elif args.func == shuffle_dataset:
+            shuffle_dataset(Path(args.db))
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("path", type=str)
-    parser.add_argument(
-        "--type", type=str, choices=["pretrain", "sft"], default="pretrain"
-    )
-    parser.add_argument("--tokenizer", type=str, default="jingyaogong/MiniMind2")
-    parser.add_argument("--max_length", type=int, default=512)
-    args = parser.parse_args()
-    cfg = DatasetLoaderConfig(
-        tokenizer=args.tokenizer,
-        max_length=args.max_length,
-        add_special_tokens=True,
-        type=args.type,
-    )
-    preprocess(args.path, cfg, args.type)
+    main()
