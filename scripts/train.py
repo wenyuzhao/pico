@@ -10,11 +10,10 @@ from torch import optim
 from torch.utils.data import DataLoader
 from contextlib import nullcontext
 from model.pixie import Pixie as Model, Config
-from scripts.dataset import PretrainDataset, SFTDataset
+from scripts.dataset import DuckDBDataset
 from torch.utils.data import Dataset
 import wandb
 import dotenv
-import uuid
 import torch.nn.functional as F
 from simple_parsing.helpers import flag, field
 import pytorch_warmup as warmup
@@ -32,8 +31,8 @@ class TrainDataset:
 
 
 DATASET = {
-    "pretrain": TrainDataset(path="datasets/fineweb-edu"),
-    "sft": TrainDataset(path="datasets/magpie-llama3.1-300k"),
+    "pretrain": TrainDataset(path="datasets/fineweb-edu", has_special_tokens=True),
+    "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1"),
 }
 
 
@@ -176,21 +175,11 @@ class Trainer:
     def init_data_loader(self):
         ds_config = DATASET[self.type]
         train_ds: Dataset
-        if self.type == "pretrain":
-            train_ds = PretrainDataset(
-                ds_config.path,
-                self.tokenizer,
-                max_length=self.args.max_seq_len or self.config.context_length,
-                add_special_tokens=not ds_config.has_special_tokens,
-            )
-        elif self.type == "sft":
-            train_ds = SFTDataset(
-                ds_config.path,
-                self.tokenizer,
-                max_length=self.args.max_seq_len or self.config.context_length,
-            )
-        else:
-            raise ValueError(f"Unknown model type: {self.type}")
+        train_ds = DuckDBDataset(
+            ds_config.path,
+            self.tokenizer,
+            max_length=self.args.max_seq_len or self.config.context_length,
+        )
         return DataLoader(
             train_ds,
             batch_size=self.args.batch_size,
