@@ -22,7 +22,7 @@ class DuckDBDataset(Dataset):
         path: str | Path,
         tokenizer: PreTrainedTokenizerFast,
         max_length: int,
-        sample: int | None = None,
+        limit: int | None = None,
     ):
         super().__init__()
         self.tokenizer = tokenizer
@@ -42,18 +42,18 @@ class DuckDBDataset(Dataset):
         result = self.conn.execute("SELECT COUNT(*) FROM dataset").fetchone()
         assert result
         records = result[0]
-        if sample is not None:
-            if sample > records:
+        if limit is not None:
+            if limit > records:
                 raise ValueError(
-                    f"Sample size {sample} is larger than the dataset size {records}."
+                    f"Limit size {limit} is larger than the dataset size {records}."
                 )
             # Count tokens
-            self.len = sample
+            self.len = limit
             r = self.conn.execute(
-                "SELECT COUNT(*) FROM dataset LIMIT ?", (sample,)
+                "SELECT SUM(tokens) FROM (SELECT tokens FROM dataset LIMIT ?)", (limit,)
             ).fetchone()
             assert r, "No records found in the dataset."
-            print(f"Sampling {sample} records from the dataset ({r[0]} tokens).")
+            print(f"Using first {limit} records from the dataset ({r[0]} tokens).")
         else:
             self.len = records
             r = self.conn.execute("SELECT COUNT(*) FROM dataset").fetchone()
@@ -70,13 +70,11 @@ class DuckDBDataset(Dataset):
         ), f"Expected {self.max_length} tokens per sample, got {tokens_per_row}."
 
     def __len__(self):
-        result = self.conn.execute("SELECT COUNT(*) FROM dataset").fetchone()
-        return result[0] if result else 0
+        return self.len
 
     def __getitem__(self, index: int):
         result = self.conn.execute(
-            "SELECT input_ids, attention_mask FROM dataset LIMIT 1 OFFSET ?",
-            (index,),
+            "SELECT input_ids, attention_mask FROM dataset LIMIT 1 OFFSET ?", (index,)
         ).fetchone()
         if not result:
             raise IndexError(f"Index {index} out of range.")

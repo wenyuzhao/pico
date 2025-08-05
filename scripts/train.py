@@ -31,7 +31,7 @@ class TrainDataset:
 
 
 DATASET = {
-    "pretrain": TrainDataset(path="datasets/pixie-pretrain", limit=1000),
+    "pretrain": TrainDataset(path="datasets/pixie-pretrain", limit=1200000),
     "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1", limit=1000),
 }
 
@@ -42,7 +42,7 @@ class TrainingConfig:
 
     out_dir: str = "./out"
     epochs: int = 1
-    batch_size: int = 48
+    batch_size: int = 26
     learning_rate: float = 5e-4
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype: str = "bfloat16" if torch.cuda.is_available() else "float32"
@@ -179,6 +179,7 @@ class Trainer:
             ds_config.path,
             self.tokenizer,
             max_length=self.args.max_seq_len or self.config.training_context_length,
+            limit=ds_config.limit,
         )
         return DataLoader(
             train_ds,
