@@ -378,7 +378,7 @@ def force_delete_from_db(db: Path, files: list[Path]):
     print(f"Deleted {len(files)} files from database {db}.", flush=True)
 
 
-def show_dataset_stats(db: Path):
+def show_dataset_stats(db: Path, limit: int | None = None):
     if db.suffix != ".db":
         raise ValueError(f"Database file must have .db suffix, got {db.suffix}")
     with duckdb.connect(db) as conn:
@@ -387,13 +387,21 @@ def show_dataset_stats(db: Path):
             print("Dataset is empty.", flush=True)
             return
         tokens_per_row = len(first[0])
-        result = conn.execute(
-            "SELECT COUNT(*), SUM(tokens), COUNT(DISTINCT file) FROM dataset"
-        ).fetchone()
+        if limit is None:
+            result = conn.execute(
+                "SELECT COUNT(*), SUM(tokens), COUNT(DISTINCT file) FROM dataset"
+            ).fetchone()
+        else:
+            result = conn.execute(
+                "SELECT COUNT(*), SUM(tokens), COUNT(DISTINCT file) FROM (SELECT * FROM dataset LIMIT ?)",
+                (limit,),
+            ).fetchone()
         if not result:
             print("No records found in the dataset.", flush=True)
             return
         total_samples, total_tokens, total_files = result
+        if limit is not None:
+            print(f"Showing stats for the first {limit} samples.", flush=True)
         print(f"Total samples: {total_samples}", flush=True)
         print(f"Total tokens: {total_tokens} ({total_tokens / 1e9:.3f} B)", flush=True)
         print(f"Total files: {total_files}", flush=True)
@@ -406,7 +414,9 @@ def shuffle_dataset(db: Path):
     start_time = time.time()
     with duckdb.connect(db) as conn:
         # Shuffle the dataset
-        conn.execute("FROM dataset ORDER BY RANDOM()")
+        conn.execute(
+            "CREATE OR REPLACE TABLE dataset AS SELECT * FROM dataset ORDER BY RANDOM()"
+        )
     elapsed_time = time.time() - start_time
     print(f"Shuffled dataset in {db}, took {elapsed_time:.2f} seconds.", flush=True)
 
@@ -439,6 +449,7 @@ def main():
     parser_stats = subparsers.add_parser("stats", help="Show dataset statistics.")
     parser_stats.add_argument("db", type=str)
     parser_stats.set_defaults(func=show_dataset_stats)
+    parser_stats.add_argument("--limit", type=int, default=None)
     # parse and run
     args = parser.parse_args()
     if hasattr(args, "func"):
@@ -454,7 +465,7 @@ def main():
         elif args.func == shuffle_dataset:
             shuffle_dataset(Path(args.db))
         elif args.func == show_dataset_stats:
-            show_dataset_stats(Path(args.db))
+            show_dataset_stats(Path(args.db), args.limit)
 
 
 if __name__ == "__main__":
