@@ -27,12 +27,12 @@ warnings.filterwarnings("ignore")
 @dataclass
 class TrainDataset:
     path: str
-    has_special_tokens: bool = False
+    limit: int | None = None
 
 
 DATASET = {
-    "pretrain": TrainDataset(path="datasets/fineweb-edu", has_special_tokens=True),
-    "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1"),
+    "pretrain": TrainDataset(path="datasets/pixie-pretrain", limit=1000),
+    "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1", limit=1000),
 }
 
 
@@ -61,7 +61,7 @@ class TrainingConfig:
     type: Literal["base", "sft"] = "base"
 
     def __post_init__(self):
-        self.max_seq_len = self.max_seq_len or Config().context_length
+        self.max_seq_len = self.max_seq_len or Config().training_context_length
         if self.checkpoint is not None:
             ckpt_path = Path(self.checkpoint)
             segments = ckpt_path.name.split("-")
@@ -178,7 +178,7 @@ class Trainer:
         train_ds = DuckDBDataset(
             ds_config.path,
             self.tokenizer,
-            max_length=self.args.max_seq_len or self.config.context_length,
+            max_length=self.args.max_seq_len or self.config.training_context_length,
         )
         return DataLoader(
             train_ds,

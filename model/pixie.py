@@ -255,7 +255,7 @@ if __name__ == "__main__":
     print(f"Total parameters: {parameters / 1e6:.3f} M")
     print(f"Vocab size: {config.vocab_size}")
     print(f"Tokenizer: {config.tokenizer}")
-    print(f"Context length: {config.context_length}")
+    print(f"Training context length: {config.training_context_length}")
     print(f"Hidden size: {config.hidden_size}")
     print(f"Attention Layers: {config.num_hidden_layers}")
     print(

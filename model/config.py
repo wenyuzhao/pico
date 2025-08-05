@@ -9,7 +9,7 @@ class Config(PretrainedConfig):
         self,
         tokenizer: str = "jingyaogong/MiniMind2",
         # tokenizer: str = "NousResearch/Llama-2-7b-hf",
-        context_length: int = 512,
+        training_context_length: int = 1024,
         hidden_size: int = 512,
         num_hidden_layers: int = 8,
         hidden_act: str = "silu",
@@ -22,7 +22,7 @@ class Config(PretrainedConfig):
     ):
         super().__init__(**kwargs)
         self.tokenizer = tokenizer
-        self.context_length = context_length
+        self.training_context_length = training_context_length
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
         self.hidden_act = hidden_act
