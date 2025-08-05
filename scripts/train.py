@@ -31,7 +31,7 @@ class TrainDataset:
 
 
 DATASET = {
-    "pretrain": TrainDataset(path="datasets/pixie-pretrain", limit=1200000),
+    "pretrain": TrainDataset(path="datasets/pixie-pretrain"),
     "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1", limit=1000),
 }
 
