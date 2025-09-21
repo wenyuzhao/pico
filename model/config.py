@@ -3,7 +3,7 @@ from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from transformers import AutoTokenizer
 from transformers.configuration_utils import PretrainedConfig
 
-DEFAULT_TOKENIZER = "Qwen/Qwen3-8B"
+DEFAULT_TOKENIZER = "microsoft/phi-4"
 TRAINING_CONTEXT_LENGTH = 1024
 
 
