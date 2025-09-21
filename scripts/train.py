@@ -51,7 +51,7 @@ class TrainingConfig:
     accumulation_steps: int = 8
     grad_clip: float = 1.0
     log_interval: int = 100
-    warmup_period: int | None = 1600
+    warmup_period: int | None = 1000
     max_seq_len: int | None = None
     """Maximum sequence length for training. If None, uses the model's context length."""
     checkpoint: str | None = field(alias="ckpt", default=None)
