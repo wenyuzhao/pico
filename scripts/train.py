@@ -31,7 +31,7 @@ class TrainDataset:
 
 
 DATASET = {
-    "pretrain": TrainDataset(path="datasets/pile", limit=1000000),
+    "pretrain": TrainDataset(path="datasets/pile", limit=1048576),  # 1B tokens
     "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1", limit=1000),
 }
 
