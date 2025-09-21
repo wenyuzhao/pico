@@ -31,7 +31,7 @@ class TrainDataset:
 
 
 DATASET = {
-    "pretrain": TrainDataset(path="datasets/pixie-pretrain"),
+    "pretrain": TrainDataset(path="datasets/pile", limit=1000000),
     "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1", limit=1000),
 }
 
@@ -42,7 +42,7 @@ class TrainingConfig:
 
     out_dir: str = "./out"
     epochs: int = 1
-    batch_size: int = 26
+    batch_size: int = 16
     learning_rate: float = 5e-4
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype: str = "bfloat16" if torch.cuda.is_available() else "float32"
@@ -123,6 +123,8 @@ class Trainer:
                 **args.__dict__,
                 **self.config.to_dict(),
                 "runid": self.runid,
+                "dataset": DATASET[self.type].path,
+                "dataset_limit": DATASET[self.type].limit,
             }
             wandb.init(
                 project=args.wandb_project_prefix + "-" + self.type,

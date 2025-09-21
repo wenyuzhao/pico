@@ -3,13 +3,15 @@ from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from transformers import AutoTokenizer
 from transformers.configuration_utils import PretrainedConfig
 
+DEFAULT_TOKENIZER = "Qwen/Qwen3-8B"
+TRAINING_CONTEXT_LENGTH = 1024
+
 
 class Config(PretrainedConfig):
     def __init__(
         self,
-        tokenizer: str = "jingyaogong/MiniMind2",
-        # tokenizer: str = "NousResearch/Llama-2-7b-hf",
-        training_context_length: int = 1024,
+        tokenizer: str = DEFAULT_TOKENIZER,
+        training_context_length: int = TRAINING_CONTEXT_LENGTH,
         hidden_size: int = 512,
         num_hidden_layers: int = 8,
         hidden_act: str = "silu",

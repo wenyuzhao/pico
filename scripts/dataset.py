@@ -15,6 +15,8 @@ from transformers import AutoTokenizer
 import duckdb
 import time
 
+from model.config import DEFAULT_TOKENIZER, TRAINING_CONTEXT_LENGTH
+
 
 class DuckDBDataset(Dataset):
     def __init__(
@@ -92,8 +94,8 @@ BATCH_SIZE = 20000
 
 @dataclass
 class DatasetLoaderConfig:
-    tokenizer: str = "jingyaogong/MiniMind2"
-    max_length: int = 512
+    tokenizer: str = DEFAULT_TOKENIZER
+    max_length: int = TRAINING_CONTEXT_LENGTH
     add_special_tokens: bool = True
     type: Literal["pretrain", "sft"] = "pretrain"
 
@@ -429,10 +431,10 @@ def main():
     parser_process.add_argument(
         "--type", type=str, choices=["pretrain", "sft"], default="pretrain"
     )
+    parser_process.add_argument("--tokenizer", type=str, default=DEFAULT_TOKENIZER)
     parser_process.add_argument(
-        "--tokenizer", type=str, default="jingyaogong/MiniMind2"
+        "--max_length", type=int, default=TRAINING_CONTEXT_LENGTH
     )
-    parser_process.add_argument("--max_length", type=int, default=1024)
     parser_process.set_defaults(func=preprocess)
     # subparser: remove
     parser_remove = subparsers.add_parser("remove")
