@@ -32,7 +32,7 @@ class TrainDataset:
 
 DATASET = {
     "pretrain": TrainDataset(path="datasets/pile", limit=1048576),  # 1B tokens
-    "sft": TrainDataset(path="datasets/magpielm-sft-data-v0.1", limit=1000),
+    "sft": TrainDataset(path="datasets/ultrachat_200k"),
 }
 
 
@@ -51,7 +51,7 @@ class TrainingConfig:
     accumulation_steps: int = 8
     grad_clip: float = 1.0
     log_interval: int = 100
-    warmup_period: int | None = 1000
+    warmup_period: int | None = 400
     max_seq_len: int | None = None
     """Maximum sequence length for training. If None, uses the model's context length."""
     checkpoint: str | None = field(alias="ckpt", default=None)

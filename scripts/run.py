@@ -81,6 +81,22 @@ class CustomStreamer(TextStreamer):
         super().__init__(tokenizer, skip_prompt=True, skip_special_tokens=True)
         self.queue = queue
         self.tokenizer = tokenizer
+        im_sep = tokenizer.get_added_vocab().get("<|im_sep|>", None)
+        if im_sep is None:
+            im_sep = tokenizer.encode("\n")[0]
+        self.im_sep = im_sep
+        self.im_sep_found = False
+
+    def put(self, value):
+        if self.skip_prompt and self.next_tokens_are_prompt:
+            self.next_tokens_are_prompt = False
+            return
+        # Skip until im_sep is found
+        if not self.im_sep_found:
+            if value == self.im_sep:
+                self.im_sep_found = True
+            return
+        super().put(value)
 
     def on_finalized_text(self, text: str, stream_end: bool = False):
         self.queue.put(text)
