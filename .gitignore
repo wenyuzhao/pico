@@ -16,3 +16,4 @@ wheels/
 /scripts/_*
 /tokenizers
 /*.log
+/configs/_*
