@@ -7,7 +7,7 @@ from ..config import PretrainedConfig
 
 class BaseGPTModel(PreTrainedModel, GenerationMixin):
     def __init__(self, config: ModelConfig):
-        self.config = config
+        self.model_config = config
         super().__init__(PretrainedConfig(config))
         self.out = CausalLMOutputWithPast()
 

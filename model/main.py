@@ -29,7 +29,7 @@ def info(config_name: str):
     print(f"Attention Heads: {config.model.num_attention_heads}")
     print(f"Feed Forward Size: {config.model.feed_forward_size}")
     print(
-        f"Tokenizer: {config.model.tokenizer} (vocab size: {model.config.get_vocab_size()})"
+        f"Tokenizer: {config.model.tokenizer} (vocab size: {model.config.vocab_size})"
     )
 
 

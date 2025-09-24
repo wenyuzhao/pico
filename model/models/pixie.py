@@ -223,7 +223,7 @@ class Transformer(nn.Module):
 class Pixie(BaseGPTModel):
     def __init__(self, config: ModelConfig, compile: bool = True):
         super().__init__(config)
-        self.model = Transformer(self.config)
+        self.model = Transformer(config)
         if compile:
             self.model = torch.compile(self.model, mode="default")
 
