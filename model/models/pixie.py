@@ -166,7 +166,7 @@ class Transformer(nn.Module):
         # Positional encoding
         cos, sin = self.precompute_freqs_cis(
             dim=config.hidden_size // config.num_attention_heads,
-            end=32768,
+            end=self.config.max_position_embeddings,
             theta=config.rope_theta,
         )
         self.register_buffer("freqs_cos", cos, persistent=False)

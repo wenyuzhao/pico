@@ -20,6 +20,7 @@ class ModelConfig(BaseModel):
     num_kv_attention_heads: int = 2
     dropout: float = 0.0
     feed_forward_size: int = 1408
+    max_position_embeddings: int = 32768
     rope_theta: float = 1e6
 
     def get_vocab_size(self) -> int:
