@@ -8,7 +8,8 @@ from transformers.activations import ACT2FN
 from transformers.generation.utils import GenerationMixin
 from transformers.modeling_utils import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from model.config import Config
+from model.config import ModelConfig
+from . import BaseGPTModel
 
 
 type PositionEmbedding = tuple[Tensor, Tensor]
@@ -152,15 +153,15 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, config: Config | None = None):
+    def __init__(self, config: ModelConfig):
         super().__init__()
-        config = config or Config()
         self.config = config
         self.hidden_size = config.hidden_size
         self.num_hidden_layers = config.num_hidden_layers
 
         # Embedding layer
-        self.tok_emb = nn.Embedding(config.vocab_size, config.hidden_size)
+        vocab_size = config.get_vocab_size()
+        self.tok_emb = nn.Embedding(vocab_size, config.hidden_size)
         self.dropout_emb = nn.Dropout(config.dropout)
         # Positional encoding
         cos, sin = self.precompute_freqs_cis(
@@ -189,7 +190,7 @@ class Transformer(nn.Module):
         # Final normalization
         self.norm = RMSNorm(config.hidden_size, eps=1e-5)
         # Final linear layer
-        self.out = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+        self.out = nn.Linear(config.hidden_size, vocab_size, bias=False)
         self.tok_emb.weight = self.out.weight
 
     def precompute_freqs_cis(self, dim: int, end: int, theta: float):
@@ -219,14 +220,10 @@ class Transformer(nn.Module):
         return logits
 
 
-class Pixie(PreTrainedModel, GenerationMixin):
-    NAME: str = "pixie"
-
-    def __init__(self, config: Config | None = None, compile: bool = True):
-        self.config = config or Config()
-        super().__init__(self.config)
+class Pixie(BaseGPTModel):
+    def __init__(self, config: ModelConfig, compile: bool = True):
+        super().__init__(config)
         self.model = Transformer(self.config)
-        self.out = CausalLMOutputWithPast()
         if compile:
             self.model = torch.compile(self.model, mode="default")
 
@@ -234,31 +231,3 @@ class Pixie(PreTrainedModel, GenerationMixin):
         logits = self.model(input_ids)
         self.out.__setitem__("logits", logits)
         return self.out
-
-    @staticmethod
-    def tokenizer(config: Config) -> PreTrainedTokenizerFast:
-        """
-        Creates the tokenizer for the model.
-        """
-        tokenizer = AutoTokenizer.from_pretrained(config.tokenizer)
-        assert isinstance(tokenizer, PreTrainedTokenizerFast)
-        return tokenizer
-
-
-if __name__ == "__main__":
-    # Print important stats about the model
-    config = Config()
-    model = Pixie(config, compile=False)
-    tokenizer = Pixie.tokenizer(config)
-    parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model: {model.NAME}")
-    print(f"Total parameters: {parameters / 1e6:.3f} M")
-    print(f"Vocab size: {config.vocab_size}")
-    print(f"Tokenizer: {config.tokenizer}")
-    print(f"Training context length: {config.training_context_length}")
-    print(f"Hidden size: {config.hidden_size}")
-    print(f"Attention Layers: {config.num_hidden_layers}")
-    print(
-        f"Attention heads: Q={config.num_attention_heads}, KV={config.num_kv_attention_heads}"
-    )
-    print(f"Feed forward size: {config.feed_forward_size}")
