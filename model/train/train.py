@@ -122,6 +122,11 @@ class Trainer:
 
         self.save_dir = Path(self.args.out_dir) / self.args.type / self.runid
         self.save_dir.mkdir(parents=True, exist_ok=True)
+        # symlink to latest
+        latest = Path(self.args.out_dir) / self.args.type / f"{self.config.name}-latest"
+        if latest.exists() or latest.is_symlink():
+            latest.unlink()
+        latest.symlink_to(self.save_dir, target_is_directory=True)
 
         # Get model configs
         if self.args.checkpoint is not None:
@@ -284,14 +289,12 @@ class Trainer:
                     break
         self.save_model(epoch=epoch)
 
-    def save_model(self, epoch: int | None = None, final: bool = False):
+    def save_model(self, epoch: int | None = None):
         self.model.eval()
         if epoch is not None:
-            ckp = self.save_dir / f"{self.config.name}-{self.args.type}-{epoch}.pth"
-        elif final:
-            ckp = self.save_dir / f"{self.config.name}-{self.args.type}.pth"
+            ckp = self.save_dir / f"model-{epoch}.pth"
         else:
-            ckp = self.save_dir / f"{self.config.name}-{self.args.type}.pth"
+            ckp = self.save_dir / f"model.pth"
 
         if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
             state_dict = self.model.module.state_dict()
@@ -307,4 +310,4 @@ class Trainer:
             if self.args.checkpoint_epoch is not None:
                 epoch = self.args.checkpoint_epoch + 1 + epoch
             self.train_epoch(epoch)
-        self.save_model(final=True)
+        self.save_model()

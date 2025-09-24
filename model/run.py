@@ -7,7 +7,8 @@ import warnings
 from threading import Thread
 from queue import Queue
 from transformers.generation.streamers import TextStreamer
-from model.pixie import Config, Pixie
+from model.config import Config
+from model.models import BaseGPTModel
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from transformers.generation.configuration_utils import GenerationConfig
 from typing import Literal
@@ -18,7 +19,7 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 @dataclass
 class Args:
-    prompt: str | list[dict[str, str]]
+    prompt: str | list[dict[str, str]] | None
     checkpoint: str
     type: Literal["base", "chat"] = "chat"
     temperature: float = 0.7
@@ -28,51 +29,17 @@ class Args:
     repl: bool = False
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("prompt", type=str, default=None, nargs="?")
-    parser.add_argument("--checkpoint", "--ckpt", type=str, required=True)
-    parser.add_argument(
-        "--type",
-        "-t",
-        type=str,
-        choices=["base", "chat"],
-        default=None,
-        help="Type of model to use: 'base' for pretraining, 'chat' for chat model.",
-    )
-    parser.add_argument("--repl", action="store_true", help="Run in REPL mode.")
-    args = parser.parse_args()
-
-    if not args.type:
-        stem = Path(args.checkpoint).stem
-        if "pretrain" in stem or "base" in stem:
-            args.type = "base"
-            assert not args.repl, "REPL mode is not supported for base model."
-            assert args.prompt is not None, "Prompt is required for base model."
-        else:
-            args.type = "chat"
-            if not args.repl:
-                assert (
-                    args.prompt is not None
-                ), "Prompt is required for chat model unless in REPL mode."
-    return Args(**args.__dict__)
-
-
-def init_model(args: Args):
+def init_model(config: Config, args: Args):
     checkpoint_file = Path(args.checkpoint)
     assert checkpoint_file.exists()
     assert checkpoint_file.suffix == ".pth"
-    config = Config.from_pretrained(checkpoint_file.parent)
-    tokenizer = Pixie.tokenizer(config)
-    model = Pixie(config, compile=False)
+    tokenizer = config.load_tokenizer()
+    model = config.load_model(compile=False)
     state_dict = {}
     for k, v in torch.load(args.checkpoint, map_location=args.device).items():
         k = k.replace("._orig_mod", "")
         state_dict[k] = v
     model.load_state_dict(state_dict, strict=True)
-    print(
-        f"Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} M"
-    )
     return model.eval().to(args.device), tokenizer  # type: ignore
 
 
@@ -80,23 +47,6 @@ class CustomStreamer(TextStreamer):
     def __init__(self, tokenizer, queue):
         super().__init__(tokenizer, skip_prompt=True, skip_special_tokens=True)
         self.queue = queue
-        self.tokenizer = tokenizer
-        im_sep = tokenizer.get_added_vocab().get("<|im_sep|>", None)
-        if im_sep is None:
-            im_sep = tokenizer.encode("\n")[0]
-        self.im_sep = im_sep
-        self.im_sep_found = False
-
-    def put(self, value):
-        if self.skip_prompt and self.next_tokens_are_prompt:
-            self.next_tokens_are_prompt = False
-            return
-        # Skip until im_sep is found
-        if not self.im_sep_found:
-            if value == self.im_sep:
-                self.im_sep_found = True
-            return
-        super().put(value)
 
     def on_finalized_text(self, text: str, stream_end: bool = False):
         self.queue.put(text)
@@ -128,15 +78,28 @@ def get_inputs(tokenizer: PreTrainedTokenizerFast, args: Args):
     return inputs
 
 
-def complete_streamed(tokenizer: PreTrainedTokenizerFast, model: Pixie, args: Args):
+def complete_streamed(
+    tokenizer: PreTrainedTokenizerFast, model: BaseGPTModel, args: Args
+):
     inputs = get_inputs(tokenizer, args)
     queue = Queue()
     streamer = CustomStreamer(tokenizer, queue)
 
     def _generate():
-        assert isinstance(model, Pixie), "Model should be an instance of Pixie."
+        assert isinstance(model, BaseGPTModel), "Model should be an instance of Pixie."
         model.generate(
             inputs.input_ids,
+            generation_config=GenerationConfig(
+                max_new_tokens=args.max_tokens,
+                do_sample=True,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                repetition_penalty=1.15,
+                attention_mask=inputs.attention_mask,
+                pad_token_id=tokenizer.pad_token_id,
+                eos_token_id=tokenizer.eos_token_id,
+                use_cache=False,
+            ),
             max_new_tokens=args.max_tokens,
             do_sample=True,
             temperature=args.temperature,
@@ -145,8 +108,8 @@ def complete_streamed(tokenizer: PreTrainedTokenizerFast, model: Pixie, args: Ar
             attention_mask=inputs.attention_mask,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
-            streamer=streamer,
             use_cache=False,
+            streamer=streamer,
         )
 
     Thread(target=_generate).start()
@@ -158,7 +121,7 @@ def complete_streamed(tokenizer: PreTrainedTokenizerFast, model: Pixie, args: Ar
         yield text
 
 
-def complete(tokenizer: PreTrainedTokenizerFast, model: Pixie, args: Args):
+def complete(tokenizer: PreTrainedTokenizerFast, model: BaseGPTModel, args: Args):
     inputs = get_inputs(tokenizer, args)
     with torch.no_grad():
         generated_ids = model.generate(
@@ -179,10 +142,26 @@ def complete(tokenizer: PreTrainedTokenizerFast, model: Pixie, args: Args):
     return answer
 
 
-def main():
-    args = parse_args()
-    args.device = "cuda" if torch.cuda.is_available() else "cpu"
-    model, tokenizer = init_model(args)
+def run_model(
+    config: Config,
+    checkpoint: str,
+    prompt: str | None,
+    repl: bool,
+    type: Literal["pretrain", "sft"],
+):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    t = "chat" if type == "sft" else "base"
+    args = Args(
+        prompt=prompt,
+        checkpoint=checkpoint,
+        type=t,
+        temperature=0.7,
+        top_p=0.92,
+        max_tokens=8192,
+        device=device,
+        repl=repl,
+    )
+    model, tokenizer = init_model(config, args)
     if not args.repl:
         for t in complete_streamed(tokenizer, model, args):
             print(t, end="", flush=True)
@@ -201,8 +180,3 @@ def main():
                 response += t
             print()
             args.prompt.append({"role": "assistant", "content": response})
-
-
-if __name__ == "__main__":
-    assert torch.cuda.is_available(), "CUDA is not available. Please check your setup."
-    main()

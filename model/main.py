@@ -3,6 +3,7 @@ from typing import Annotated, Literal
 import typer
 from model.config import BaseTrainingConfig, Config
 from model.models import BaseGPTModel
+from model.run import run_model
 from model.train.train import Trainer
 import model.train.dataset as dataset
 
@@ -106,6 +107,26 @@ def dataset_shuffle(db: str):
 @dataset_app.command(name="info")
 def dataset_info(db: str, limit: int | None = None):
     dataset.show_dataset_stats(Path(db), limit)
+
+
+@app.command(name="run")
+def run(
+    config_name: str,
+    type: Annotated[Literal["pretrain", "sft"], typer.Option("--type", "-t")],
+    prompt: Annotated[str | None, typer.Option("--prompt", "-p")] = None,
+    checkpoint: Annotated[str | None, typer.Option("--checkpoint", "--ckpt")] = None,
+    repl: bool = False,
+):
+    if not checkpoint:
+        checkpoint = f"out/{type}/{config_name}-latest/model.pth"
+    if repl:
+        assert type == "sft", "REPL mode is only supported for 'sft' type."
+        assert prompt is None, "Prompt should not be provided in REPL mode."
+    else:
+        assert prompt is not None, "Prompt must be provided if not in REPL mode."
+    config = Config.load(f"configs/{config_name}.yaml")
+    print(f"[RUN] Loading model from {checkpoint} ...")
+    run_model(config, checkpoint, prompt, repl, type)
 
 
 def main():
