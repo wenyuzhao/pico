@@ -131,6 +131,10 @@ def create_chat_prompt(
                 if key in x and "content" not in x:
                     x["content"] = x[key]
                     del x[key]
+        # Trim entries: last entry must be from user
+        # while len(msgs) > 0 and msgs[-1]["role"] != "user":
+        #     msgs.pop()
+    # records = [r for r in records if len(r) > 0]
     # Tokenize the conversations
     prompts = tokenizer.apply_chat_template(records, tokenize=False)
     assert isinstance(prompts, list), "Prompts should be a list."
