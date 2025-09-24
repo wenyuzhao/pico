@@ -18,7 +18,7 @@ app = typer.Typer(
 
 
 @app.command(help="Prints information about the model.")
-def info(config_name: str):
+def info(config_name: str, verbose: bool = False):
     config = Config.load(f"configs/{config_name}.yaml")
     model = BaseGPTModel.load(config)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -32,6 +32,9 @@ def info(config_name: str):
     print(
         f"Tokenizer: {config.model.tokenizer} (vocab size: {model.config.vocab_size})"
     )
+    if verbose:
+        print("\nFull Configuration:")
+        print(config.model_dump())
 
 
 @app.command()

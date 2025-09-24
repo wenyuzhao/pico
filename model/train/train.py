@@ -34,6 +34,7 @@ class TrainingConfig:
     learning_rate: float
     grad_clip: float
     warmup_steps: int | None
+    type: Literal["pretrain", "sft"]
 
     # Additional fields
     out_dir: str = "./out"
@@ -43,7 +44,6 @@ class TrainingConfig:
     checkpoint: str | None = None
     max_steps: int | None = None
     name: str | None = None
-    type: Literal["base", "sft"] = "base"
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype: str = "bfloat16" if torch.cuda.is_available() else "float32"
 
@@ -65,6 +65,7 @@ class TrainingConfig:
             checkpoint=checkpoint,
             wandb=wandb,
             dataset=dataset,
+            type="pretrain",
         )
 
     @staticmethod
@@ -83,7 +84,7 @@ class TrainingConfig:
         else:
             self.checkpoint_epoch = None
             self.checkpoint_runid = None
-        if self.type != "base":
+        if self.type != "pretrain":
             assert self.checkpoint is not None
 
 
@@ -99,8 +100,8 @@ class Trainer:
         assert (
             torch.cuda.is_available()
         ), "CUDA is not available. Please check your setup."
-        assert self.config.name
-        self.runid = self.config.name
+        assert config.name
+        self.runid = config.name
         if project is not None:
             self.runid += "-" + slugify(project)
         # get git branch name
@@ -120,13 +121,16 @@ class Trainer:
             else TrainingConfig.sft(config, checkpoint=checkpoint, wandb=use_wandb)
         )
 
-        self.save_dir = Path(self.args.out_dir) / self.args.type / self.runid
+        assert self.config.name
+        self.save_dir = (
+            Path(self.args.out_dir) / self.config.name / self.args.type / self.runid
+        )
         self.save_dir.mkdir(parents=True, exist_ok=True)
         # symlink to latest
-        latest = Path(self.args.out_dir) / self.args.type / f"{self.config.name}-latest"
+        latest = Path(self.args.out_dir) / self.config.name / self.args.type / "latest"
         if latest.exists() or latest.is_symlink():
             latest.unlink()
-        latest.symlink_to(self.save_dir, target_is_directory=True)
+        latest.symlink_to(self.save_dir.resolve(), target_is_directory=True)
 
         # Get model configs
         if self.args.checkpoint is not None:
