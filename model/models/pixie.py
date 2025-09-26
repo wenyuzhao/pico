@@ -1,12 +1,8 @@
 import torch
 from torch import nn, Tensor
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
-from transformers import AutoTokenizer
 from torch.nn import RMSNorm
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
-from transformers.generation.utils import GenerationMixin
-from transformers.modeling_utils import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from model.config import ModelConfig
 from . import BaseGPTModel

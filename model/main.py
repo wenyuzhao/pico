@@ -121,7 +121,7 @@ def run(
     repl: bool = False,
 ):
     if not checkpoint:
-        checkpoint = f"out/{type}/{config_name}-latest/model.pth"
+        checkpoint = f"out/{config_name}/{type}/latest/model.pth"
     if repl:
         assert type == "sft", "REPL mode is only supported for 'sft' type."
         assert prompt is None, "Prompt should not be provided in REPL mode."
