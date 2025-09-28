@@ -20,7 +20,7 @@ app = typer.Typer(
 @app.command(help="Prints information about the model.")
 def info(config_name: str, verbose: bool = False):
     config = Config.load(f"configs/{config_name}.yaml")
-    model = BaseGPTModel.load(config)
+    model = BaseGPTModel.load(config.model)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[{config_name}]")
     print(f"Model: {config.model.name}")

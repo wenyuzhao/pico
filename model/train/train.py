@@ -184,7 +184,8 @@ class Trainer:
 
     def init_model(self):
         tokenizer = self.config.load_tokenizer()
-        model = self.config.load_model(compile=True).to(self.args.device)  # type: ignore
+        model = self.config.load_model()
+        model = torch.compile(model, mode="default").to(self.args.device)  # type: ignore
         print(
             f"Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} M"
         )

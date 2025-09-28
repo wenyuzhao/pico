@@ -4,11 +4,21 @@ from torch.nn import RMSNorm
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from model.config import ModelConfig
+from model.config import ModelConfig, BaseModel
 from . import BaseGPTModel, register_model
 
 
-class PixieConfig(ModelConfig): ...
+class LayerConfig(BaseModel):
+    hidden_size: int
+    num_kv_attention_heads: int | None = None
+    feed_forward_size: int | None = None
+    act: str = "silu"
+    dropout: float = 0.1
+
+
+class PixieConfig(ModelConfig):
+    # layer_configs: list[LayerConfig]
+    ...
 
 
 type PositionEmbedding = tuple[Tensor, Tensor]
@@ -212,14 +222,16 @@ class Transformer(nn.Module):
             self.freqs_sin[start : start + seq_len],
         )
         for layer in self.layers:
-            x = layer(x, position_embedding=pos)  # [batch_size, seq_len, hidden_size]
+            x = x + layer(
+                x, position_embedding=pos
+            )  # [batch_size, seq_len, hidden_size]
         # Final normalization and linear layer
         x = self.norm(x)  # [batch_size, seq_len, hidden_size]
         logits = self.out(x)  # [batch_size, seq_len, vocab_size]
         return logits
 
 
-@register_model("pixie", PixieConfig)
+@register_model("pixie_x", PixieConfig)
 class Pixie(BaseGPTModel):
     def __init__(self, config: PixieConfig):
         super().__init__(config)

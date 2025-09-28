@@ -34,10 +34,10 @@ def init_model(config: Config, args: Args):
     assert checkpoint_file.exists()
     assert checkpoint_file.suffix == ".pth"
     tokenizer = config.load_tokenizer()
-    model = config.load_model(compile=False)
+    model = config.load_model()
     state_dict = {}
     for k, v in torch.load(args.checkpoint, map_location=args.device).items():
-        k = k.replace("._orig_mod", "")
+        k = k.replace("._orig_mod", "").replace("_orig_mod.", "")
         state_dict[k] = v
     model.load_state_dict(state_dict, strict=True)
     return model.eval().to(args.device), tokenizer  # type: ignore

@@ -58,19 +58,30 @@ class Config(BaseModel):
 
     @staticmethod
     def load(path: str | Path) -> "Config":
+        from model.models import MODELS
+
         data = load_yaml_and_resolve_imports(path)
+        # Create model config
+        model_name = data.get("model", {}).get("name", None)
+        assert (
+            model_name is not None
+        ), "Model name must be specified in the configuration."
+        _, ConfigType = MODELS[model_name]
+        mc = ConfigType(**data.get("model", {}))
+        del data["model"]
+        data["model"] = mc
         config = Config(**data)
         if config.name is None:
             config.name = Path(path).stem
         return config
 
-    def load_model(self, compile: bool = False) -> "BaseGPTModel":
+    def load_model(self) -> "BaseGPTModel":
         """
         Creates the model configuration.
         """
         from model.models import BaseGPTModel
 
-        return BaseGPTModel.load(self, compile=compile)
+        return BaseGPTModel.load(self.model)
 
     def load_tokenizer(self) -> PreTrainedTokenizerFast:
         """
