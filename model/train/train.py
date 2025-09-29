@@ -90,7 +90,35 @@ class TrainingArgs(BaseModel):
     def sft(
         runid: str, config: Config, checkpoint: str | None, wandb: bool
     ) -> "TrainingArgs":
-        raise NotImplementedError("SFT training config not implemented yet.")
+        assert config.sft is not None, "SFT configuration is not set."
+        cfg = config.sft
+        dataset = cfg.dataset
+        if isinstance(dataset, str):
+            dataset = DatasetConfig(path=dataset)
+        optimizer = cfg.optimizer
+        if isinstance(optimizer, str):
+            if optimizer == "adamw":
+                optimizer = AdamWOptimizerConfig()
+            elif optimizer == "lion":
+                optimizer = LionOptimizerConfig()
+            else:
+                raise ValueError(f"Unsupported optimizer: {optimizer}")
+        return TrainingArgs(
+            context_length=cfg.context_length,
+            batch_size=cfg.batch_size,
+            epochs=cfg.epochs,
+            grad_clip=cfg.grad_clip,
+            warmup_steps=cfg.warmup_steps,
+            accumulation_steps=cfg.accumulation_steps,
+            gradient_checkpointing=cfg.gradient_checkpointing,
+            optimizer=optimizer,
+            dataset=dataset,
+            checkpoint=checkpoint,
+            wandb=wandb,
+            type="sft",
+            config=config,
+            runid=runid,
+        )
 
     def model_post_init(self, __context: Any) -> None:
         if self.checkpoint is not None:
@@ -158,7 +186,7 @@ class Trainer:
         # Load and save model configs
         if self.args.checkpoint is not None:
             prev_config = Config.load(Path(self.args.checkpoint).parent / "config.yaml")
-            assert prev_config == self.config, "Config mismatch with checkpoint."
+            # assert prev_config == self.config, "Config mismatch with checkpoint."
         else:
             self.config.save(self.save_dir / "config.yaml")
         (self.save_dir / "args.yaml").write_text(yaml.safe_dump(self.args.model_dump()))

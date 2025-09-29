@@ -61,6 +61,26 @@ def pretrain(
     trainer.train()
 
 
+@app.command()
+def sft(
+    config_name: str,
+    checkpoint: Annotated[str, typer.Option("--checkpoint", "--ckpt")],
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    wandb: bool = False,
+):
+    dotenv.load_dotenv()
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    config = Config.load(f"configs/{config_name}.yaml")
+    trainer = Trainer(
+        config,
+        project=project,
+        checkpoint=checkpoint,
+        use_wandb=wandb,
+        train_type="sft",
+    )
+    trainer.train()
+
+
 dataset_app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,

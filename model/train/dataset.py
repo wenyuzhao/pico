@@ -101,151 +101,6 @@ class DatasetLoaderConfig:
         self._tokenizer = tok
 
 
-def create_chat_prompt(
-    conversations: list[list[dict[str, str]]],
-    tokenizer: PreTrainedTokenizerFast,
-) -> list[str]:
-    alt_role_keys = ["from"]
-    role_mapping: dict[str, str] = {
-        "human": "user",
-        "gpt": "assistant",
-    }
-    alt_content_keys = ["value"]
-    records: list[np.ndarray[dict[str, str]]] = (  # type: ignore
-        [conversations] if isinstance(conversations[0], dict) else conversations
-    )
-    records: list[list[dict[str, str]]] = [r.tolist() if not isinstance(r, list) else r for r in records]  # type: ignore
-    # Fix record keys
-    for msgs in records:
-        for x in msgs:
-            for key in alt_role_keys:
-                if key in x and "role" not in x:
-                    x["role"] = x[key]
-                    del x[key]
-            x["role"] = role_mapping.get(x["role"], x["role"])
-            for key in alt_content_keys:
-                if key in x and "content" not in x:
-                    x["content"] = x[key]
-                    del x[key]
-        # Trim entries: last entry must be from user
-        # while len(msgs) > 0 and msgs[-1]["role"] != "user":
-        #     msgs.pop()
-    # records = [r for r in records if len(r) > 0]
-    # Tokenize the conversations
-    prompts = tokenizer.apply_chat_template(records, tokenize=False)
-    assert isinstance(prompts, list), "Prompts should be a list."
-    return prompts  # type: ignore
-
-
-def process_pretrain_data(
-    df: pd.DataFrame, cfg: DatasetLoaderConfig
-) -> Generator[pd.DataFrame]:
-    possible_text_columns = ["text", "content"]
-    col_name: str | None = None
-    for col in possible_text_columns:
-        if col in df.columns:
-            col_name = col
-            break
-    assert col_name is not None, "No text column found in the DataFrame."
-    samples = df[col_name]
-    tok = cfg._tokenizer
-    if cfg.add_special_tokens:
-        (bos, eos) = (tok.bos_token, tok.eos_token)
-        (bos_id, eos_id) = (tok.bos_token_id, tok.eos_token_id)
-        if bos and eos:
-            single = f"{bos} $A {eos}"
-            pair = f"{bos} $A {eos} $B:1 {eos}:1"
-            special_tokens = [(bos, bos_id), (eos, eos_id)]
-        elif not bos and eos:
-            single = f"$A {eos}"
-            pair = f"$A {eos} $B:1 {eos}:1"
-            special_tokens = [(eos, eos_id)]
-        else:
-            raise ValueError(f"bos={bos}, eos={eos}")
-        tok._tokenizer.post_processor = processors.Sequence(  # type: ignore
-            [
-                processors.TemplateProcessing(
-                    single=single, pair=pair, special_tokens=special_tokens
-                ),
-            ]
-        )
-    # Do it batched
-    for i in range(0, len(samples), BATCH_SIZE):
-        print(f"       . {i} / {len(samples)}", flush=True)
-        max_index = min(i + BATCH_SIZE, len(samples))
-        slice = samples[i:max_index].to_list()
-        if len(slice) == 0:
-            continue
-        encoding = tok(
-            slice,
-            max_length=cfg.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-            add_special_tokens=cfg.add_special_tokens,
-            return_overflowing_tokens=True,
-        )
-        all_input_ids = []
-        all_attention_masks = []
-        for input_ids, attention_mask in zip(
-            encoding.input_ids, encoding.attention_mask
-        ):
-            input_ids = input_ids.squeeze().numpy()
-            attention_mask = attention_mask.squeeze().numpy()
-            all_input_ids.append(input_ids)
-            all_attention_masks.append(attention_mask)
-        df = pd.DataFrame(
-            {"input_ids": all_input_ids, "attention_mask": all_attention_masks}
-        )
-        yield df
-
-
-def process_sft_data(
-    df: pd.DataFrame, cfg: DatasetLoaderConfig
-) -> Generator[pd.DataFrame]:
-    conversations: list[list[dict[str, str]]] = (
-        df["conversations"] if "conversations" in df.columns else df["messages"]
-    ).to_list()
-    tok = cfg._tokenizer
-    samples = create_chat_prompt(conversations, tok)
-    # Do it batched
-    for i in range(0, len(samples), BATCH_SIZE):
-        print(f"       . {i} / {len(samples)}", flush=True)
-        max_index = min(i + BATCH_SIZE, len(samples))
-        slice = samples[i:max_index]
-        encoding = tok(
-            slice,
-            max_length=cfg.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-            add_special_tokens=cfg.add_special_tokens,
-        )
-        all_input_ids = []
-        all_attention_masks = []
-        pad = tok.pad_token_id
-        assert pad is not None, "Tokenizer must have a pad token."
-        end = tok.eos_token_id
-        assert end is not None, "Tokenizer must have an eos token."
-        for input_ids, attention_mask in zip(
-            encoding.input_ids, encoding.attention_mask
-        ):
-            input_ids = input_ids.squeeze().numpy()
-            last_token = input_ids[-1]
-            if last_token != end and last_token != pad:
-                continue
-            attention_mask = attention_mask.squeeze().numpy()
-            # truncate
-            input_ids = input_ids[: cfg.max_length]
-            attention_mask = attention_mask[: cfg.max_length]
-            all_input_ids.append(input_ids)
-            all_attention_masks.append(attention_mask)
-        df = pd.DataFrame(
-            {"input_ids": all_input_ids, "attention_mask": all_attention_masks}
-        )
-        yield df
-
-
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 assert (PROJECT_ROOT / "pyproject.toml").exists(), "Not in the project root."
 
@@ -254,6 +109,8 @@ def create_database(conn: duckdb.DuckDBPyConnection, max_len: int):
     conn.execute(
         f"CREATE TABLE IF NOT EXISTS dataset (input_ids INTEGER[{max_len}], attention_mask INTEGER[{max_len}], file VARCHAR, tokens INTEGER)"
     )
+    # clear any existing data
+    conn.execute("DELETE FROM dataset")
 
 
 def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "sft"]):
@@ -263,9 +120,13 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
 
     def processor(df: pd.DataFrame) -> Generator[pd.DataFrame]:
         if type == "pretrain":
-            yield from process_pretrain_data(df, cfg)
+            from model.train.dataset_raw import process_raw
+
+            yield from process_raw(df, cfg)
         elif type == "sft":
-            yield from process_sft_data(df, cfg)
+            from model.train.dataset_sft import process_sft
+
+            yield from process_sft(df, cfg)
         else:
             raise ValueError(f"Unsupported dataset type: {type}")
 
