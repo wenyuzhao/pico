@@ -1,0 +1,4 @@
+import: pixie-70m.yaml
+
+override:
+  pretrain.optimizer: lion

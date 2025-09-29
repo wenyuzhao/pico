@@ -1,6 +1,6 @@
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
-from pydantic import BaseModel
+from typing import Annotated, Any, TYPE_CHECKING, Literal
+from pydantic import BaseModel, Field
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from transformers import AutoTokenizer
 from transformers.configuration_utils import PretrainedConfig as _PretrainedConfig
@@ -34,14 +34,33 @@ class DatasetConfig(BaseModel):
     limit: int | None = None
 
 
+class AdamWOptimizerConfig(BaseModel):
+    name: Literal["adamw"] = "adamw"
+    learning_rate: float = 5e-4
+
+
+class LionOptimizerConfig(BaseModel):
+    name: Literal["lion"] = "lion"
+    learning_rate: float = 1e-4
+    weight_decay: float = 1e-2
+
+
+type OptimizerConfig = Annotated[
+    AdamWOptimizerConfig | LionOptimizerConfig, Field(discriminator="name")
+]
+
+
 class BaseTrainingConfig(BaseModel):
     dataset: str | DatasetConfig
     context_length: int
     batch_size: int
+
     epochs: int = 1
-    learning_rate: float = 5e-4
     grad_clip: float = 1.0
     warmup_steps: int | None = 400
+    accumulation_steps: int = 8
+    gradient_checkpointing: bool = False
+    optimizer: OptimizerConfig | Literal["adamw", "lion"] = "adamw"
 
 
 class PretrainConfig(BaseTrainingConfig): ...

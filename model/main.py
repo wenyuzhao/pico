@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Annotated, Literal
 import typer
@@ -6,7 +7,9 @@ from model.models import BaseGPTModel
 from model.run import run_model
 from model.train.train import Trainer
 import model.train.dataset as dataset
+import warnings
 
+warnings.filterwarnings("ignore")
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -44,6 +47,7 @@ def pretrain(
     checkpoint: Annotated[str | None, typer.Option("--checkpoint", "--ckpt")] = None,
     wandb: bool = False,
 ):
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = Config.load(f"configs/{config_name}.yaml")
     trainer = Trainer(
         config,

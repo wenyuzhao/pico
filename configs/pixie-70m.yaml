@@ -8,12 +8,15 @@ model:
   feed_forward_size: 1408
 
 pretrain:
-  context_length: 1024
   dataset:
     path: datasets/pile
     limit: 1048576
-  epochs: 1
+  context_length: 1024
   batch_size: 4
-  learning_rate: 5e-4
+  epochs: 1
   grad_clip: 1.0
   warmup_steps: 400
+  accumulation_steps: 16
+  optimizer:
+    name: adamw
+    learning_rate: 5e-4

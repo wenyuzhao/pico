@@ -1,78 +1,98 @@
-from dataclasses import dataclass
 from pathlib import Path
 import time
-from typing import Literal
-import warnings
+from typing import Any, Literal
+from pydantic import BaseModel
 from slugify import slugify
 import torch
 from torch import optim
 from torch.utils.data import DataLoader
 from contextlib import nullcontext
-from model.config import DatasetConfig, Config
+import yaml
+from model.config import (
+    DatasetConfig,
+    Config,
+    AdamWOptimizerConfig,
+    LionOptimizerConfig,
+)
+from lion_pytorch import Lion
 from model.train.dataset import DuckDBDataset
 from torch.utils.data import Dataset
 import wandb
-import dotenv
 import torch.nn.functional as F
 import pytorch_warmup as warmup
 import git
 
-dotenv.load_dotenv()
 
-warnings.filterwarnings("ignore")
-
-
-@dataclass
-class TrainingConfig:
+class TrainingArgs(BaseModel):
     """Training parameters."""
 
     # Fields from model config
-    dataset: DatasetConfig
     context_length: int
     batch_size: int
     epochs: int
-    learning_rate: float
     grad_clip: float
     warmup_steps: int | None
+    accumulation_steps: int
+    gradient_checkpointing: bool
+    optimizer: AdamWOptimizerConfig | LionOptimizerConfig
+    dataset: DatasetConfig
     type: Literal["pretrain", "sft"]
 
     # Additional fields
+    config: Config
+    runid: str
     out_dir: str = "./out"
     wandb: bool = False
-    accumulation_steps: int = 8
     log_interval: int = 100
     checkpoint: str | None = None
     max_steps: int | None = None
     name: str | None = None
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
     dtype: str = "bfloat16" if torch.cuda.is_available() else "float32"
+    checkpoint_epoch: int | None = None
+    checkpoint_runid: str | None = None
 
     @staticmethod
     def pretrain(
-        config: Config, checkpoint: str | None, wandb: bool
-    ) -> "TrainingConfig":
-        assert config.pretrain is not None
-        dataset = config.pretrain.dataset
+        runid: str, config: Config, checkpoint: str | None, wandb: bool
+    ) -> "TrainingArgs":
+        assert config.pretrain is not None, "Pretrain configuration is not set."
+        cfg = config.pretrain
+        dataset = cfg.dataset
         if isinstance(dataset, str):
             dataset = DatasetConfig(path=dataset)
-        return TrainingConfig(
-            epochs=config.pretrain.epochs,
-            batch_size=config.pretrain.batch_size,
-            learning_rate=config.pretrain.learning_rate,
-            warmup_steps=config.pretrain.warmup_steps,
-            context_length=config.pretrain.context_length,
-            grad_clip=config.pretrain.grad_clip,
+        optimizer = cfg.optimizer
+        if isinstance(optimizer, str):
+            if optimizer == "adamw":
+                optimizer = AdamWOptimizerConfig()
+            elif optimizer == "lion":
+                optimizer = LionOptimizerConfig()
+            else:
+                raise ValueError(f"Unsupported optimizer: {optimizer}")
+        return TrainingArgs(
+            context_length=cfg.context_length,
+            batch_size=cfg.batch_size,
+            epochs=cfg.epochs,
+            grad_clip=cfg.grad_clip,
+            warmup_steps=cfg.warmup_steps,
+            accumulation_steps=cfg.accumulation_steps,
+            gradient_checkpointing=cfg.gradient_checkpointing,
+            optimizer=optimizer,
+            dataset=dataset,
             checkpoint=checkpoint,
             wandb=wandb,
-            dataset=dataset,
             type="pretrain",
+            config=config,
+            runid=runid,
         )
 
     @staticmethod
-    def sft(config: Config, checkpoint: str | None, wandb: bool) -> "TrainingConfig":
+    def sft(
+        runid: str, config: Config, checkpoint: str | None, wandb: bool
+    ) -> "TrainingArgs":
         raise NotImplementedError("SFT training config not implemented yet.")
 
-    def __post_init__(self):
+    def model_post_init(self, __context: Any) -> None:
         if self.checkpoint is not None:
             ckpt_path = Path(self.checkpoint)
             segments = ckpt_path.name.split("-")
@@ -116,9 +136,13 @@ class Trainer:
 
         self.config = config
         self.args = (
-            TrainingConfig.pretrain(config, checkpoint=checkpoint, wandb=use_wandb)
+            TrainingArgs.pretrain(
+                self.runid, config, checkpoint=checkpoint, wandb=use_wandb
+            )
             if train_type == "pretrain"
-            else TrainingConfig.sft(config, checkpoint=checkpoint, wandb=use_wandb)
+            else TrainingArgs.sft(
+                self.runid, config, checkpoint=checkpoint, wandb=use_wandb
+            )
         )
 
         assert self.config.name
@@ -131,14 +155,13 @@ class Trainer:
         if latest.exists() or latest.is_symlink():
             latest.unlink()
         latest.symlink_to(self.save_dir.resolve(), target_is_directory=True)
-
-        # Get model configs
+        # Load and save model configs
         if self.args.checkpoint is not None:
             prev_config = Config.load(Path(self.args.checkpoint).parent / "config.yaml")
             assert prev_config == self.config, "Config mismatch with checkpoint."
         else:
             self.config.save(self.save_dir / "config.yaml")
-
+        (self.save_dir / "args.yaml").write_text(yaml.safe_dump(self.args.model_dump()))
         # Setup device and context
         self.ctx = (
             nullcontext()
@@ -146,17 +169,11 @@ class Trainer:
             else torch.amp.autocast_mode.autocast("cuda")
         )
         # Initialize WandB if enabled
+        assert self.config.name
         if self.args.wandb:
-            wandb_config = {
-                "runid": self.runid,
-                "config": self.config.model_dump(),
-                "train_config": self.args.__dict__,
-            }
-            assert self.config.name
+            wandb_proj = self.config.name + "-" + self.args.type
             wandb.init(
-                project=self.config.name + "-" + self.args.type,
-                name=self.runid,
-                config=wandb_config,
+                project=wandb_proj, name=self.runid, config=self.args.model_dump()
             )
         # Initialize model, tokenizer, and data loader
         self.model, self.tokenizer = self.init_model()
@@ -165,14 +182,11 @@ class Trainer:
         self.scaler = torch.amp.grad_scaler.GradScaler(
             "cuda", enabled=(self.args.dtype in ["float16", "bfloat16"])
         )
-        self.optimizer = optim.AdamW(
-            self.model.parameters(),
-            lr=self.args.learning_rate,
-        )
+        self.optimizer = self.init_optimizer()
         self.lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
             T_max=self.args.epochs * self.iter_per_epoch,
-            eta_min=self.args.learning_rate / 10,
+            eta_min=self.args.optimizer.learning_rate / 10,
         )
         self.warmup_scheduler = (
             warmup.ExponentialWarmup(
@@ -189,6 +203,8 @@ class Trainer:
         print(
             f"Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} M"
         )
+        if self.args.gradient_checkpointing:
+            model.gradient_checkpointing_enable()
         if self.args.checkpoint is not None:
             model.load_state_dict(
                 torch.load(self.args.checkpoint, map_location=self.args.device),
@@ -219,6 +235,22 @@ class Trainer:
             num_workers=1,
             sampler=None,
         )
+
+    def init_optimizer(self):
+        opt = self.args.optimizer
+        match opt.name:
+            case "adamw":
+                return optim.AdamW(
+                    self.model.parameters(),
+                    lr=opt.learning_rate,
+                )
+            case "lion":
+                return Lion(
+                    self.model.parameters(),
+                    lr=opt.learning_rate,
+                    weight_decay=opt.weight_decay,
+                )
+        raise ValueError(f"Unsupported optimizer: {opt.name}")
 
     def log(self, epoch: int, step: int, loss: float, lr: float, epoch_time: float):
         print(
