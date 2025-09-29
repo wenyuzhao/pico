@@ -8,6 +8,7 @@ from model.run import run_model
 from model.train.train import Trainer
 import model.train.dataset as dataset
 import warnings
+import dotenv
 
 warnings.filterwarnings("ignore")
 
@@ -47,6 +48,7 @@ def pretrain(
     checkpoint: Annotated[str | None, typer.Option("--checkpoint", "--ckpt")] = None,
     wandb: bool = False,
 ):
+    dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = Config.load(f"configs/{config_name}.yaml")
     trainer = Trainer(
