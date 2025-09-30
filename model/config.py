@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated, Any, TYPE_CHECKING, Literal
+from typing import Annotated, Any, TYPE_CHECKING, Literal, Self
 from pydantic import BaseModel, Field
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from transformers import AutoTokenizer
@@ -8,6 +8,15 @@ import yaml
 
 if TYPE_CHECKING:
     from model.models import BaseGPTModel
+
+
+class GenerationConfig(BaseModel):
+    max_new_tokens: int
+    temperature: float
+    top_p: float
+    repetition_penalty: float
+    do_sample: bool
+    use_cache: bool
 
 
 class ModelConfig(BaseModel):
@@ -22,6 +31,7 @@ class ModelConfig(BaseModel):
     feed_forward_size: int
     max_position_embeddings: int
     rope_theta: float
+    generation: GenerationConfig
 
     def get_vocab_size(self) -> int:
         tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
@@ -30,10 +40,6 @@ class ModelConfig(BaseModel):
 
     def to_dict(self):
         return self.model_dump()
-
-    @staticmethod
-    def from_dict(data: dict[str, Any]) -> "ModelConfig":
-        return ModelConfig(**data)
 
     def model_post_init(self, context: Any) -> None:
         num_kv_attention_heads = self.num_kv_attention_heads or self.num_attention_heads
@@ -54,6 +60,15 @@ class ModelConfig(BaseModel):
         tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
         assert isinstance(tokenizer, PreTrainedTokenizerFast)
         return tokenizer
+
+    @classmethod
+    def cast(cls, data: dict[str, Any] | Self | _PretrainedConfig) -> Self:
+        if isinstance(data, cls):
+            return data
+        if isinstance(data, _PretrainedConfig):
+            data = data.to_dict()
+        assert isinstance(data, dict)
+        return cls(**data)
 
 
 class DatasetConfig(BaseModel):
@@ -142,9 +157,6 @@ class Config(BaseModel):
 
 class PretrainedConfig(_PretrainedConfig):
     has_no_defaults_at_init = True
-
-    def __init__(self, **kwargs: Any):
-        super().__init__(**kwargs)
 
 
 def merge_yaml(dict1: dict[str, Any], dict2: dict[str, Any]) -> dict[str, Any]:

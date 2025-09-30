@@ -15,14 +15,15 @@ class BaseGPTModel(PreTrainedModel, GenerationMixin):
         tok = config.load_tokenizer()
         super().__init__(PretrainedConfig(**config.to_dict()))
         assert self.generation_config
-        self.generation_config.max_new_tokens = 1024
-        self.generation_config.do_sample = True
-        self.generation_config.temperature = 0.7
-        self.generation_config.top_p = 0.92
-        self.generation_config.repetition_penalty = 1.15
+        gcfg = self.model_config.generation
+        self.generation_config.max_new_tokens = gcfg.max_new_tokens
+        self.generation_config.do_sample = gcfg.do_sample
+        self.generation_config.temperature = gcfg.temperature
+        self.generation_config.top_p = gcfg.top_p
+        self.generation_config.repetition_penalty = gcfg.repetition_penalty
         self.generation_config.pad_token_id = tok.pad_token_id
         self.generation_config.eos_token_id = tok.eos_token_id
-        self.generation_config.use_cache = False
+        self.generation_config.use_cache = gcfg.use_cache
         self.out = CausalLMOutputWithPast()
         self.model: nn.Module
 

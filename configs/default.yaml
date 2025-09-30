@@ -1,0 +1,44 @@
+model:
+  name: pixie
+  tokenizer: microsoft/phi-4
+  hidden_size: 512
+  num_hidden_layers: 8
+  num_attention_heads: 8
+  num_kv_attention_heads: 2
+  feed_forward_size: 1408
+  generation:
+    max_new_tokens: 8192
+    temperature: 0.7
+    top_p: 0.95
+    repetition_penalty: 1.15
+    do_sample: true
+    use_cache: false
+
+pretrain:
+  dataset:
+    path: datasets/pile
+    limit: 1048576
+  context_length: 1024
+  batch_size: 4
+  epochs: 1
+  grad_clip: 1.0
+  warmup_steps: 400
+  accumulation_steps: 16
+  optimizer:
+    name: lion
+    learning_rate: 1e-4
+    weight_decay: 0.01
+
+sft:
+  dataset: datasets/alpaca
+  context_length: 1024
+  batch_size: 4
+  epochs: 5
+  grad_clip: 1.0
+  warmup_steps: 100
+  accumulation_steps: 16
+  optimizer:
+    name: lion
+    learning_rate: 1e-4
+    weight_decay: 0.01
+

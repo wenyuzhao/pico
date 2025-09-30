@@ -227,8 +227,7 @@ class Transformer(nn.Module):
 @register_model("pixie", PixieConfig)
 class Pixie(BaseGPTModel):
     def __init__(self, config: PixieConfig | PretrainedConfig):
-        if isinstance(config, PretrainedConfig):
-            config = PixieConfig(**config.to_dict())
+        config = PixieConfig.cast(config)
         super().__init__(config)
         self.model = Transformer(config)
 

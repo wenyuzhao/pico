@@ -1,3 +1,5 @@
+import: default.yaml
+
 model:
   name: pixie
   tokenizer: microsoft/phi-4
@@ -6,31 +8,3 @@ model:
   num_attention_heads: 8
   num_kv_attention_heads: 2
   feed_forward_size: 1408
-
-pretrain:
-  dataset:
-    path: datasets/pile
-    limit: 1048576
-  context_length: 1024
-  batch_size: 4
-  epochs: 1
-  grad_clip: 1.0
-  warmup_steps: 400
-  accumulation_steps: 16
-  optimizer:
-    name: lion
-    learning_rate: 1e-4
-    weight_decay: 0.01
-
-sft:
-  dataset: datasets/alpaca
-  context_length: 1024
-  batch_size: 4
-  epochs: 5
-  grad_clip: 1.0
-  warmup_steps: 100
-  accumulation_steps: 16
-  optimizer:
-    name: lion
-    learning_rate: 1e-4
-    weight_decay: 0.01
