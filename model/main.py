@@ -44,39 +44,35 @@ def info(config_name: str, verbose: bool = False):
 @app.command()
 def pretrain(
     config_name: str,
-    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
-    checkpoint: Annotated[str | None, typer.Option("--checkpoint", "--ckpt")] = None,
+    proj: Annotated[str | None, typer.Option("--project", "-p")] = None,
     wandb: bool = False,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = Config.load(f"configs/{config_name}.yaml")
     trainer = Trainer(
-        config,
-        project=project,
-        checkpoint=checkpoint,
-        use_wandb=wandb,
-        train_type="pretrain",
+        config, project=proj, checkpoint=None, use_wandb=wandb, train_type="pretrain"
     )
     trainer.train()
 
 
 @app.command()
 def sft(
-    config_name: str,
-    checkpoint: Annotated[str, typer.Option("--checkpoint", "--ckpt")],
-    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
+    proj: Annotated[str | None, typer.Option("--project", "-p")] = None,
     wandb: bool = False,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    config = Config.load(f"configs/{config_name}.yaml")
+    if ckpt.is_dir():
+        config = Config.load(ckpt / "config.yaml")
+        assert config.sft is not None, "SFT configuration is missing."
+    else:
+        assert ckpt.suffix == ".pth", "Checkpoint must be a .pth file."
+        config = Config.load(ckpt.parent / "config.yaml")
+        assert config.sft is not None, "SFT configuration is missing."
     trainer = Trainer(
-        config,
-        project=project,
-        checkpoint=checkpoint,
-        use_wandb=wandb,
-        train_type="sft",
+        config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="sft"
     )
     trainer.train()
 

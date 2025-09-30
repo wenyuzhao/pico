@@ -44,7 +44,7 @@ class TrainingArgs(BaseModel):
     out_dir: str = "./out"
     wandb: bool = False
     log_interval: int = 100
-    checkpoint: str | None = None
+    checkpoint: Path | None = None
     max_steps: int | None = None
     name: str | None = None
     device: str = "cuda:0" if torch.cuda.is_available() else "cpu"
@@ -53,9 +53,7 @@ class TrainingArgs(BaseModel):
     checkpoint_runid: str | None = None
 
     @staticmethod
-    def pretrain(
-        runid: str, config: Config, checkpoint: str | None, wandb: bool
-    ) -> "TrainingArgs":
+    def pretrain(runid: str, config: Config, wandb: bool) -> "TrainingArgs":
         assert config.pretrain is not None, "Pretrain configuration is not set."
         cfg = config.pretrain
         dataset = cfg.dataset
@@ -79,7 +77,7 @@ class TrainingArgs(BaseModel):
             gradient_checkpointing=cfg.gradient_checkpointing,
             optimizer=optimizer,
             dataset=dataset,
-            checkpoint=checkpoint,
+            checkpoint=None,
             wandb=wandb,
             type="pretrain",
             config=config,
@@ -88,7 +86,7 @@ class TrainingArgs(BaseModel):
 
     @staticmethod
     def sft(
-        runid: str, config: Config, checkpoint: str | None, wandb: bool
+        runid: str, config: Config, checkpoint: Path | None, wandb: bool
     ) -> "TrainingArgs":
         assert config.sft is not None, "SFT configuration is not set."
         cfg = config.sft
@@ -103,6 +101,10 @@ class TrainingArgs(BaseModel):
                 optimizer = LionOptimizerConfig()
             else:
                 raise ValueError(f"Unsupported optimizer: {optimizer}")
+        assert checkpoint is not None, "Checkpoint must be provided for SFT."
+        if checkpoint.is_dir():
+            checkpoint = checkpoint / "model.pth"
+            assert checkpoint.exists(), f"Checkpoint not found: {checkpoint}"
         return TrainingArgs(
             context_length=cfg.context_length,
             batch_size=cfg.batch_size,
@@ -141,7 +143,7 @@ class Trainer:
         self,
         config: Config,
         project: str | None,
-        checkpoint: str | None,
+        checkpoint: Path | None,
         use_wandb: bool,
         train_type: Literal["pretrain", "sft"],
     ):
@@ -164,9 +166,7 @@ class Trainer:
 
         self.config = config
         self.args = (
-            TrainingArgs.pretrain(
-                self.runid, config, checkpoint=checkpoint, wandb=use_wandb
-            )
+            TrainingArgs.pretrain(self.runid, config, wandb=use_wandb)
             if train_type == "pretrain"
             else TrainingArgs.sft(
                 self.runid, config, checkpoint=checkpoint, wandb=use_wandb
