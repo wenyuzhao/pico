@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal
 import typer
-from model.config import BaseTrainingConfig, Config
+from model.config import Config
 from model.models import BaseGPTModel
 from model.run import run_model
 from model.train.train import Trainer
