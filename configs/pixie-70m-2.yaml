@@ -1,7 +1,0 @@
-import: pixie-70m.yaml
-
-model:
-  hidden_size: 256
-  num_hidden_layers: 38
-  num_attention_heads: 8
-  num_kv_attention_heads: 2
