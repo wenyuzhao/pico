@@ -8,14 +8,14 @@ from torch import optim
 from torch.utils.data import DataLoader
 from contextlib import nullcontext
 import yaml
-from model.config import (
+from pixie.config import (
     DatasetConfig,
     Config,
     AdamWOptimizerConfig,
     LionOptimizerConfig,
 )
 from lion_pytorch import Lion
-from model.train.dataset import DuckDBDataset
+from .dataset import DuckDBDataset
 from torch.utils.data import Dataset
 import wandb
 import torch.nn.functional as F

@@ -1,7 +1,7 @@
 import pandas as pd
 from tokenizers import processors
 from typing import Generator
-from model.train.dataset import BATCH_SIZE, DatasetLoaderConfig
+from .dataset import BATCH_SIZE, DatasetLoaderConfig
 
 
 def process_raw(df: pd.DataFrame, cfg: DatasetLoaderConfig) -> Generator[pd.DataFrame]:

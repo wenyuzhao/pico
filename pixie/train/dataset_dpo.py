@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from typing import Generator, TypedDict, cast
-from model.train.dataset import BATCH_SIZE, DatasetLoaderConfig
+from .dataset import BATCH_SIZE, DatasetLoaderConfig
 
 
 class Message(TypedDict):

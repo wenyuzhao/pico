@@ -7,7 +7,7 @@ from transformers.configuration_utils import PretrainedConfig as _PretrainedConf
 import yaml
 
 if TYPE_CHECKING:
-    from model.models import BaseGPTModel
+    from .models import BaseGPTModel
 
 
 class GenerationConfig(BaseModel):
@@ -123,7 +123,7 @@ class Config(BaseModel):
 
     @staticmethod
     def load(path: str | Path) -> "Config":
-        from model.models import MODELS
+        from .models import MODELS
 
         data = load_yaml_and_resolve_imports(path)
         # Create model config
@@ -144,7 +144,7 @@ class Config(BaseModel):
         """
         Creates the model configuration.
         """
-        from model.models import BaseGPTModel
+        from .models import BaseGPTModel
 
         return BaseGPTModel.load(self.model)
 

@@ -6,7 +6,6 @@ from torch.utils.data import Dataset
 import torch
 import pandas as pd
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
-from tokenizers import processors
 from typing import Generator, Literal
 from slugify import slugify
 from transformers import AutoTokenizer
@@ -145,15 +144,15 @@ def preprocess(
 
     def processor(df: pd.DataFrame) -> Generator[pd.DataFrame]:
         if type == "pretrain":
-            from model.train.dataset_raw import process_raw
+            from .dataset_raw import process_raw
 
             yield from process_raw(df, cfg)
         elif type == "sft":
-            from model.train.dataset_sft import process_sft
+            from .dataset_sft import process_sft
 
             yield from process_sft(df, cfg)
         elif type == "dpo":
-            from model.train.dataset_dpo import process_dpo
+            from .dataset_dpo import process_dpo
 
             yield from process_dpo(df, cfg)
         else:

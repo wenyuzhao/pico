@@ -1,8 +1,7 @@
 from transformers.generation.utils import GenerationMixin
 from transformers.modeling_utils import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from model.config import ModelConfig
-from ..config import PretrainedConfig
+from ..config import PretrainedConfig, ModelConfig
 from torch import nn
 from transformers import AutoConfig, AutoModelForCausalLM
 

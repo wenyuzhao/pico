@@ -4,7 +4,7 @@ from torch.nn import RMSNorm
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from model.config import ModelConfig, PretrainedConfig, BaseModel
+from ..config import ModelConfig, PretrainedConfig, BaseModel
 from . import BaseGPTModel, register_model
 
 

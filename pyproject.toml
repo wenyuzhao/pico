@@ -24,13 +24,13 @@ dependencies = [
 ]
 
 [project.scripts]
-pixie = "model.main:main"
+pixie = "pixie.main:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 
 [tool.hatch.build.targets.wheel]
-packages = ["scripts", "model"]
+packages = ["pixie"]
 
 [build-system]
 requires = ["hatchling"]

@@ -2,11 +2,11 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal
 import typer
-from model.config import Config
-from model.models import BaseGPTModel
-from model.run import run_model
-from model.train.train import Trainer
-import model.train.dataset as dataset
+from .config import Config
+from .models import BaseGPTModel
+from .run import run_model
+from pixie.train.train import Trainer
+import pixie.train.dataset as dataset
 import warnings
 import dotenv
 
