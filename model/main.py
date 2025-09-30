@@ -146,13 +146,12 @@ def run(
         and not (model_path / "model.safetensors").exists()
         and (model_path / "latest" / "model.safetensors").exists()
     ):
-        path = model_path / "latest"
+        model_path = model_path / "latest"
     assert (
         model_path / "model.safetensors"
     ).exists(), f"Model not found in {model_path}"
     run_type: Literal["chat", "gen", "repl"]
     if repl:
-        assert type == "sft", "REPL mode is only supported for 'sft' type."
         assert chat is None, "--chat should not be provided in REPL mode."
         assert gen is None, "--gen should not be provided in REPL mode."
         prompt = None
