@@ -507,7 +507,7 @@ wheels = [
 ]
 
 [[package]]
-name = "pixie"
+name = "pixie-ai"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

@@ -1,5 +1,5 @@
 [project]
-name = "pixie"
+name = "pixie-ai"
 version = "0.1.0"
 description = "Tiny experimental LLM"
 readme = "README.md"
