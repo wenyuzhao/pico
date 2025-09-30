@@ -136,22 +136,34 @@ def dataset_info(db: str, limit: int | None = None):
 
 @app.command(name="run")
 def run(
-    config_name: str,
-    type: Annotated[Literal["pretrain", "sft"], typer.Option("--type", "-t")],
-    prompt: Annotated[str | None, typer.Option("--prompt", "-p")] = None,
-    checkpoint: Annotated[str | None, typer.Option("--checkpoint", "--ckpt")] = None,
+    model_path: Path,
+    chat: Annotated[str | None, typer.Option("--chat")] = None,
+    gen: Annotated[str | None, typer.Option("--gen")] = None,
     repl: bool = False,
 ):
-    if not checkpoint:
-        checkpoint = f"out/{config_name}/{type}/latest/model.pth"
+    if (
+        model_path.is_dir()
+        and not (model_path / "model.safetensors").exists()
+        and (model_path / "latest" / "model.safetensors").exists()
+    ):
+        path = model_path / "latest"
+    assert (
+        model_path / "model.safetensors"
+    ).exists(), f"Model not found in {model_path}"
+    run_type: Literal["chat", "gen", "repl"]
     if repl:
         assert type == "sft", "REPL mode is only supported for 'sft' type."
-        assert prompt is None, "Prompt should not be provided in REPL mode."
+        assert chat is None, "--chat should not be provided in REPL mode."
+        assert gen is None, "--gen should not be provided in REPL mode."
+        prompt = None
+        run_type = "repl"
     else:
-        assert prompt is not None, "Prompt must be provided if not in REPL mode."
-    config = Config.load(f"configs/{config_name}.yaml")
-    print(f"[RUN] Loading model from {checkpoint} ...")
-    run_model(config, checkpoint, prompt, repl, type)
+        assert chat or gen, "Either --chat or --gen must be provided."
+        assert not (chat and gen), "Only one of --chat or --gen can be provided."
+        prompt = chat if chat else gen
+        run_type = "chat" if chat else "gen"
+
+    run_model(model_path, prompt, run_type)
 
 
 def main():

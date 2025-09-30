@@ -4,12 +4,25 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from model.config import ModelConfig
 from ..config import PretrainedConfig
 from torch import nn
+from transformers import AutoConfig, AutoModelForCausalLM
 
 
 class BaseGPTModel(PreTrainedModel, GenerationMixin):
+    config_class = PretrainedConfig
+
     def __init__(self, config: ModelConfig):
         self.model_config = config
-        super().__init__(PretrainedConfig(config))
+        tok = config.load_tokenizer()
+        super().__init__(PretrainedConfig(**config.to_dict()))
+        assert self.generation_config
+        self.generation_config.max_new_tokens = 1024
+        self.generation_config.do_sample = True
+        self.generation_config.temperature = 0.7
+        self.generation_config.top_p = 0.92
+        self.generation_config.repetition_penalty = 1.15
+        self.generation_config.pad_token_id = tok.pad_token_id
+        self.generation_config.eos_token_id = tok.eos_token_id
+        self.generation_config.use_cache = False
         self.out = CausalLMOutputWithPast()
         self.model: nn.Module
 
@@ -29,6 +42,14 @@ def register_model(name: str, config: type[ModelConfig]):
         if name in MODELS:
             raise ValueError(f"Model {name} is already registered.")
         MODELS[name] = (cls, config)
+
+        class PretrainedConfig2(PretrainedConfig):
+            model_type = name
+
+        cls.config_class = PretrainedConfig2
+        AutoConfig.register(name, PretrainedConfig2)
+        AutoModelForCausalLM.register(PretrainedConfig2, cls)
+        return cls
 
     return _register
 

@@ -184,11 +184,7 @@ class Trainer:
             latest.unlink()
         latest.symlink_to(self.save_dir.resolve(), target_is_directory=True)
         # Load and save model configs
-        if self.args.checkpoint is not None:
-            prev_config = Config.load(Path(self.args.checkpoint).parent / "config.yaml")
-            # assert prev_config == self.config, "Config mismatch with checkpoint."
-        else:
-            self.config.save(self.save_dir / "config.yaml")
+        self.config.save(self.save_dir / "config.yaml")
         (self.save_dir / "args.yaml").write_text(yaml.safe_dump(self.args.model_dump()))
         # Setup device and context
         self.ctx = (
@@ -366,8 +362,11 @@ class Trainer:
         else:
             state_dict = self.model.state_dict()
 
-        state_dict = {k: v.half() for k, v in state_dict.items()}  # 半精度保存
+        state_dict = {k: v.half() for k, v in state_dict.items()}
         torch.save(state_dict, ckp)
+        if epoch is None:
+            self.model.save_pretrained(self.save_dir, safe_serialization=True)  # type: ignore
+            self.tokenizer.save_pretrained(self.save_dir, save_jinja_files=False)
         self.model.train()
 
     def train(self):

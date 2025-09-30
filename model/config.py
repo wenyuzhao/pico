@@ -12,21 +12,48 @@ if TYPE_CHECKING:
 
 class ModelConfig(BaseModel):
     name: str
-    tokenizer: str = "microsoft/phi-4"
-    hidden_size: int = 512
-    num_hidden_layers: int = 8
-    hidden_act: str = "silu"
-    num_attention_heads: int = 8
-    num_kv_attention_heads: int = 2
-    dropout: float = 0.0
-    feed_forward_size: int = 1408
-    max_position_embeddings: int = 32768
-    rope_theta: float = 1e6
+    tokenizer: str
+    hidden_size: int
+    num_hidden_layers: int
+    hidden_act: str
+    num_attention_heads: int
+    num_kv_attention_heads: int
+    dropout: float
+    feed_forward_size: int
+    max_position_embeddings: int
+    rope_theta: float
 
     def get_vocab_size(self) -> int:
         tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
         assert isinstance(tokenizer, PreTrainedTokenizerFast)
         return tokenizer.vocab_size + len(tokenizer.additional_special_tokens)
+
+    def to_dict(self):
+        return self.model_dump()
+
+    @staticmethod
+    def from_dict(data: dict[str, Any]) -> "ModelConfig":
+        return ModelConfig(**data)
+
+    def model_post_init(self, context: Any) -> None:
+        num_kv_attention_heads = self.num_kv_attention_heads or self.num_attention_heads
+        assert (
+            self.num_attention_heads % num_kv_attention_heads == 0
+        ), "num_attention_heads must be divisible by num_kv_attention_heads"
+        assert (
+            self.hidden_size % self.num_attention_heads == 0
+        ), "hidden_size must be divisible by num_attention_heads"
+        if self.feed_forward_size is None or self.feed_forward_size == 0:
+            self.feed_forward_size = self.hidden_size * 4
+        assert self.feed_forward_size > 0, "feed_forward_size must be positive"
+
+    def load_tokenizer(self) -> PreTrainedTokenizerFast:
+        """
+        Creates the tokenizer for the model.
+        """
+        tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
+        assert isinstance(tokenizer, PreTrainedTokenizerFast)
+        return tokenizer
 
 
 class DatasetConfig(BaseModel):
@@ -106,9 +133,7 @@ class Config(BaseModel):
         """
         Creates the tokenizer for the model.
         """
-        tokenizer = AutoTokenizer.from_pretrained(self.model.tokenizer)
-        assert isinstance(tokenizer, PreTrainedTokenizerFast)
-        return tokenizer
+        return self.model.load_tokenizer()
 
     def save(self, path: str | Path):
         with open(path, "w") as f:
@@ -116,35 +141,10 @@ class Config(BaseModel):
 
 
 class PretrainedConfig(_PretrainedConfig):
-    def __init__(
-        self,
-        config: ModelConfig,
-        **kwargs: Any,
-    ):
-        super().__init__(**kwargs)
-        self.tokenizer = config.tokenizer
-        self.hidden_size = config.hidden_size
-        self.num_hidden_layers = config.num_hidden_layers
-        self.hidden_act = config.hidden_act
-        self.num_attention_heads = config.num_attention_heads
-        self.num_kv_attention_heads = config.num_kv_attention_heads
-        self.dropout = config.dropout
-        self.feed_forward_size = config.feed_forward_size
-        self.rope_theta = config.rope_theta
-        self.vocab_size = config.get_vocab_size()
-        num_kv_attention_heads = self.num_kv_attention_heads or self.num_attention_heads
-        assert (
-            self.num_attention_heads % num_kv_attention_heads == 0
-        ), "num_attention_heads must be divisible by num_kv_attention_heads"
-        assert (
-            self.hidden_size % self.num_attention_heads == 0
-        ), "hidden_size must be divisible by num_attention_heads"
-        if self.feed_forward_size is None or self.feed_forward_size == 0:
-            self.feed_forward_size = self.hidden_size * 4
-        assert self.feed_forward_size > 0, "feed_forward_size must be positive"
+    has_no_defaults_at_init = True
 
-    def to_dict(self):
-        return self.__dict__
+    def __init__(self, **kwargs: Any):
+        super().__init__(**kwargs)
 
 
 def merge_yaml(dict1: dict[str, Any], dict2: dict[str, Any]) -> dict[str, Any]:

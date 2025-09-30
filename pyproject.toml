@@ -5,6 +5,7 @@ description = "Tiny experimental LLM"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "accelerate>=1.10.1",
     "duckdb>=1.3.2",
     "lion-pytorch>=0.2.3",
     "pandas>=2.3.1",

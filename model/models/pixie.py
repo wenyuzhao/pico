@@ -4,7 +4,7 @@ from torch.nn import RMSNorm
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from model.config import ModelConfig
+from model.config import ModelConfig, PretrainedConfig
 from . import BaseGPTModel, register_model
 
 
@@ -190,7 +190,12 @@ class Transformer(nn.Module):
         self.norm = RMSNorm(config.hidden_size, eps=1e-5)
         # Final linear layer
         self.out = nn.Linear(config.hidden_size, vocab_size, bias=False)
+        self._dynamic_tied_weights_keys = ["out.weight", "tok_emb.weight"]
         self.tok_emb.weight = self.out.weight
+
+    def _tie_weights(self) -> None:
+        self._dynamic_tied_weights_keys = ["out.weight", "tok_emb.weight"]
+        self.out.weight = self.tok_emb.weight
 
     def precompute_freqs_cis(self, dim: int, end: int, theta: float):
         freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
@@ -221,7 +226,9 @@ class Transformer(nn.Module):
 
 @register_model("pixie", PixieConfig)
 class Pixie(BaseGPTModel):
-    def __init__(self, config: PixieConfig):
+    def __init__(self, config: PixieConfig | PretrainedConfig):
+        if isinstance(config, PretrainedConfig):
+            config = PixieConfig(**config.to_dict())
         super().__init__(config)
         self.model = Transformer(config)
 
