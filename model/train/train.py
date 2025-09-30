@@ -254,7 +254,12 @@ class Trainer:
                 print(f"Loaded checkpoint from {self.args.checkpoint}")
         if self.args.type == "dpo":
             ref_model = self.config.load_model()
-            ref_model = ref_model.to(self.args.device)  # type: ignore
+            ref_model = torch.compile(ref_model, mode="default").to(self.args.device)  # type: ignore
+            assert self.args.checkpoint is not None
+            ref_model.load_state_dict(
+                torch.load(self.args.checkpoint, map_location=self.args.device),
+                strict=True,
+            )
             ref_model.eval()
             ref_model.requires_grad_(False)
         else:
