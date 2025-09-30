@@ -77,6 +77,27 @@ def sft(
     trainer.train()
 
 
+@app.command()
+def dpo(
+    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
+    proj: Annotated[str | None, typer.Option("--project", "-p")] = None,
+    wandb: bool = False,
+):
+    dotenv.load_dotenv()
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    if ckpt.is_dir():
+        config = Config.load(ckpt / "config.yaml")
+        assert config.dpo is not None, "DPO configuration is missing."
+    else:
+        assert ckpt.suffix == ".pth", "Checkpoint must be a .pth file."
+        config = Config.load(ckpt.parent / "config.yaml")
+        assert config.dpo is not None, "DPO configuration is missing."
+    trainer = Trainer(
+        config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="dpo"
+    )
+    trainer.train()
+
+
 dataset_app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
@@ -89,26 +110,14 @@ app.add_typer(dataset_app, name="dataset", help="Dataset related commands.")
 
 @dataset_app.command(name="preprocess")
 def dataset_preprocess(
-    config_name: str,
-    type: Annotated[Literal["pretrain", "sft"], typer.Option("--type", "-t")],
+    path: Path,
+    type: Annotated[Literal["pretrain", "sft", "dpo"], typer.Option("--type", "-t")],
+    tokenizer: Annotated[str, typer.Option("--tokenizer", "--tok", "-k")],
+    max_length: Annotated[int, typer.Option("--max-length", "--len", "-l")],
 ):
-    config = Config.load(f"configs/{config_name}.yaml")
-    train_cfg: BaseTrainingConfig
-    match type:
-        case "pretrain":
-            assert config.pretrain is not None
-            train_cfg = config.pretrain
-        case "sft":
-            assert config.sft is not None
-            train_cfg = config.sft
-    path = (
-        train_cfg.dataset
-        if isinstance(train_cfg.dataset, str)
-        else train_cfg.dataset.path
-    )
     cfg = dataset.DatasetLoaderConfig(
-        tokenizer=config.model.tokenizer,
-        max_length=train_cfg.context_length,
+        tokenizer=tokenizer,
+        max_length=max_length,
         add_special_tokens=True,
         type=type,
     )

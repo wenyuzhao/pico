@@ -111,11 +111,15 @@ class PretrainConfig(BaseTrainingConfig): ...
 class SFTConfig(BaseTrainingConfig): ...
 
 
+class DPOConfig(BaseTrainingConfig): ...
+
+
 class Config(BaseModel):
     name: str | None = None
     model: ModelConfig
     pretrain: PretrainConfig | None = None
     sft: SFTConfig | None = None
+    dpo: DPOConfig | None = None
 
     @staticmethod
     def load(path: str | Path) -> "Config":

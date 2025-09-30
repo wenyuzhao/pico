@@ -42,3 +42,15 @@ sft:
     learning_rate: 1e-4
     weight_decay: 0.01
 
+dpo:
+  dataset: datasets/magpielm-dpo-data-v0.1
+  context_length: 1024
+  batch_size: 4
+  epochs: 5
+  grad_clip: 1.0
+  warmup_steps: 100
+  accumulation_steps: 16
+  optimizer:
+    name: lion
+    learning_rate: 1e-4
+    weight_decay: 0.01

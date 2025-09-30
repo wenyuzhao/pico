@@ -54,35 +54,59 @@ class DuckDBDataset(Dataset):
             print(f"Using first {limit} records from the dataset ({r[0]} tokens).")
         else:
             self.len = records
-            r = self.conn.execute("SELECT COUNT(*) FROM dataset").fetchone()
+            r = self.conn.execute("SELECT SUM(tokens) FROM dataset").fetchone()
             assert r, "No records found in the dataset."
             print(f"Using the entire dataset with {self.len} records ({r[0]} tokens).")
 
-        # verify vector length in the database
         r = self.conn.execute("SELECT input_ids FROM dataset LIMIT 1").fetchone()
         if not r:
             raise ValueError("Dataset is empty.")
-        tokens_per_row = len(r[0])
-        assert (
-            tokens_per_row == self.max_length
-        ), f"Expected {self.max_length} tokens per sample, got {tokens_per_row}."
+        self.is_dpo = not r[0]
 
     def __len__(self):
         return self.len
 
     def __getitem__(self, index: int):
-        result = self.conn.execute(
-            "SELECT input_ids, attention_mask FROM dataset LIMIT 1 OFFSET ?", (index,)
-        ).fetchone()
-        if not result:
-            raise IndexError(f"Index {index} out of range.")
-        input_ids, attention_mask = result
-        assert len(input_ids) == self.max_length
-        assert len(attention_mask) == self.max_length
-        X = torch.tensor(input_ids[:-1], dtype=torch.long)
-        Y = torch.tensor(input_ids[1:], dtype=torch.long)
-        loss_mask = torch.tensor(attention_mask[1:], dtype=torch.long)
-        return X, Y, loss_mask
+        if not self.is_dpo:
+            result = self.conn.execute(
+                "SELECT input_ids, attention_mask FROM dataset LIMIT 1 OFFSET ?",
+                (index,),
+            ).fetchone()
+            if not result:
+                raise IndexError(f"Index {index} out of range.")
+            input_ids, attention_mask = result
+            assert len(input_ids) == self.max_length
+            assert len(attention_mask) == self.max_length
+            X = torch.tensor(input_ids[:-1], dtype=torch.long)
+            Y = torch.tensor(input_ids[1:], dtype=torch.long)
+            loss_mask = torch.tensor(attention_mask[1:], dtype=torch.long)
+            return X, Y, loss_mask
+        else:
+            result = self.conn.execute(
+                "SELECT chosen, chosen_mask, rejected, rejected_mask FROM dataset LIMIT 1 OFFSET ?",
+                (index,),
+            ).fetchone()
+            if not result:
+                raise IndexError(f"Index {index} out of range.")
+            chosen, chosen_mask, rejected, rejected_mask = result
+            assert len(chosen) == self.max_length
+            assert len(chosen_mask) == self.max_length
+            assert len(rejected) == self.max_length
+            assert len(rejected_mask) == self.max_length
+            chosen_x = torch.tensor(chosen[:-1], dtype=torch.long)
+            chosen_y = torch.tensor(chosen[1:], dtype=torch.long)
+            chosen_loss_mask = torch.tensor(chosen_mask[1:], dtype=torch.long)
+            rejected_x = torch.tensor(rejected[:-1], dtype=torch.long)
+            rejected_y = torch.tensor(rejected[1:], dtype=torch.long)
+            rejected_loss_mask = torch.tensor(rejected_mask[1:], dtype=torch.long)
+            return {
+                "chosen_x": chosen_x,
+                "chosen_y": chosen_y,
+                "chosen_mask": chosen_loss_mask,
+                "rejected_x": rejected_x,
+                "rejected_y": rejected_y,
+                "rejected_mask": rejected_loss_mask,
+            }
 
 
 BATCH_SIZE = 20000
@@ -93,7 +117,7 @@ class DatasetLoaderConfig:
     tokenizer: str
     max_length: int
     add_special_tokens: bool = True
-    type: Literal["pretrain", "sft"] = "pretrain"
+    type: Literal["pretrain", "sft", "dpo"] = "pretrain"
 
     def __post_init__(self):
         tok = AutoTokenizer.from_pretrained(self.tokenizer)
@@ -105,16 +129,17 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 assert (PROJECT_ROOT / "pyproject.toml").exists(), "Not in the project root."
 
 
-def create_database(conn: duckdb.DuckDBPyConnection, max_len: int):
+def create_database(conn: duckdb.DuckDBPyConnection):
     conn.execute(
-        f"CREATE TABLE IF NOT EXISTS dataset (input_ids INTEGER[{max_len}], attention_mask INTEGER[{max_len}], file VARCHAR, tokens INTEGER)"
+        f"CREATE TABLE IF NOT EXISTS dataset (input_ids INTEGER[], attention_mask INTEGER[], chosen INTEGER[], chosen_mask INTEGER[], rejected INTEGER[], rejected_mask INTEGER[], file VARCHAR, tokens INTEGER)"
     )
     # clear any existing data
     conn.execute("DELETE FROM dataset")
 
 
-def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "sft"]):
-    data_path = Path(path)
+def preprocess(
+    data_path: Path, cfg: DatasetLoaderConfig, type: Literal["pretrain", "sft", "dpo"]
+):
     if not data_path.exists():
         raise FileNotFoundError(f"Path {data_path} does not exist.")
 
@@ -127,17 +152,43 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
             from model.train.dataset_sft import process_sft
 
             yield from process_sft(df, cfg)
+        elif type == "dpo":
+            from model.train.dataset_dpo import process_dpo
+
+            yield from process_dpo(df, cfg)
         else:
             raise ValueError(f"Unsupported dataset type: {type}")
 
     def insert_into_db(
         file: Path, df: pd.DataFrame, conn: duckdb.DuckDBPyConnection
     ) -> int:
+        # Add empty columns for all keys if not existing
+        keys = [
+            "input_ids",
+            "attention_mask",
+            "chosen",
+            "chosen_mask",
+            "rejected",
+            "rejected_mask",
+        ]
+        for key in keys:
+            if key not in df.columns:
+                df[key] = [None] * len(df)
         file_path = file.resolve().relative_to(PROJECT_ROOT)
-        df = df[["input_ids", "attention_mask"]]
+        df = df[keys]
         # Add file name to the DataFrame
         df["file"] = [str(file_path)] * len(df)
-        df["tokens"] = df["input_ids"].apply(lambda x: int(np.count_nonzero(x)))
+        df["tokens"] = (
+            df["input_ids"].apply(
+                lambda x: int(np.count_nonzero(x if x is not None else []))
+            )
+            + df["chosen"].apply(
+                lambda x: int(np.count_nonzero(x if x is not None else []))
+            )
+            + df["rejected"].apply(
+                lambda x: int(np.count_nonzero(x if x is not None else []))
+            )
+        )
         total_tokens = df["tokens"].sum()
         # Insert into database
         conn.execute("INSERT INTO dataset BY NAME SELECT * FROM df")
@@ -179,8 +230,7 @@ def preprocess(path: str, cfg: DatasetLoaderConfig, type: Literal["pretrain", "s
         db_path = data_path.with_suffix(db_name)
     with duckdb.connect(db_path) as conn:
         # 0. Create the database and table if not exists
-        max_len = cfg.max_length
-        create_database(conn, max_len)
+        create_database(conn)
         # 1. find out all files in the database
         print(f"1. Collecting files in the database ...", flush=True)
         all_files_in_db = conn.execute("SELECT DISTINCT file FROM dataset").fetchall()
