@@ -197,7 +197,9 @@ class Trainer:
         latest.symlink_to(self.save_dir.resolve(), target_is_directory=True)
         # Load and save model configs
         self.config.save(self.save_dir / "config.yaml")
-        (self.save_dir / "args.yaml").write_text(yaml.safe_dump(self.args.model_dump()))
+        args_to_save = self.args.model_dump()
+        del args_to_save["config"]
+        (self.save_dir / "args.yaml").write_text(yaml.safe_dump(args_to_save))
         # Setup device and context
         self.ctx = (
             nullcontext()
@@ -272,6 +274,7 @@ class Trainer:
             self.args.dataset.path,
             self.tokenizer,
             max_length=self.args.context_length,
+            type=self.args.type,
             limit=self.args.dataset.limit,
         )
         return DataLoader(

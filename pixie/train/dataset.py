@@ -24,8 +24,8 @@ class DuckDBDataset(Dataset):
         path: str | Path,
         tokenizer: PreTrainedTokenizerFast,
         max_length: int,
+        type: Literal["pretrain", "sft", "dpo"],
         limit: int | None = None,
-        type: Literal["pretrain", "sft", "dpo"] = "pretrain",
     ):
         super().__init__()
         self.tokenizer = tokenizer
@@ -69,7 +69,7 @@ class DuckDBDataset(Dataset):
         return self.len
 
     def __getitem__(self, index: int):
-        if self.type == "dpo":
+        if self.type == "pretrain":
             result = self.conn.execute(
                 "SELECT input_ids FROM dataset LIMIT 1 OFFSET ?",
                 (index,),

@@ -102,7 +102,7 @@ class SFTDataPreprocessor(DataPreprocessor):
             {
                 "input_ids": data["input_ids"].tolist(),
                 "attention_mask": attention_mask,
-                "assistant_mask": data["assistant_mask"].tolist(),
+                "assistant_mask": data["assistant_masks"].tolist(),
                 "tokens": [np.count_nonzero(x) for x in attention_mask],
             }
         )
