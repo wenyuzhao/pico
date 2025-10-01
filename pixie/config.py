@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Annotated, Any, TYPE_CHECKING, Literal, Self
 from pydantic import BaseModel, Field
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
-from transformers import AutoTokenizer
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.configuration_utils import PretrainedConfig as _PretrainedConfig
 import yaml
 

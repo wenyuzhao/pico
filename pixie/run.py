@@ -1,16 +1,11 @@
-import os
 from pathlib import Path
 from typing import Literal, TypedDict
-import warnings
 from threading import Thread
 from queue import Queue
 from transformers.generation.streamers import TextStreamer
-from transformers import AutoTokenizer
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.pipelines import pipeline
 from transformers.pipelines.text_generation import TextGenerationPipeline
-
-warnings.filterwarnings("ignore")
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 
 class Message(TypedDict):

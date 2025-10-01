@@ -3,7 +3,8 @@ from transformers.modeling_utils import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from ..config import PretrainedConfig, ModelConfig
 from torch import nn
-from transformers import AutoConfig, AutoModelForCausalLM
+from transformers.models.auto.configuration_auto import AutoConfig
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
 
 class BaseGPTModel(PreTrainedModel, GenerationMixin):

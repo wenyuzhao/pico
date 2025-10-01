@@ -1,17 +1,16 @@
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import numpy as np
 from torch.utils.data import Dataset
 import torch
 import pandas as pd
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from typing import Generator, Literal
 from slugify import slugify
-from transformers import AutoTokenizer
+from transformers.models.auto.tokenization_auto import AutoTokenizer
 import duckdb
 import time
-from typing import Generator, TypedDict, cast
+from typing import Generator
 
 CHAT_TEMPLATES = {
     "microsoft/phi-4": "{% for message in messages %}{% if (message['role'] == 'system') %}{{'<|im_start|>system<|im_sep|>' + message['content'] + '<|im_end|>'}}{% elif (message['role'] == 'user') %}{{'<|im_start|>user<|im_sep|>' + message['content'] + '<|im_end|>'}}{% elif (message['role'] == 'assistant') %}<|im_start|>assistant<|im_sep|>{% generation %}{{message['content']}}<|im_end|>{% endgeneration %}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant<|im_sep|>' }}{% endif %}",

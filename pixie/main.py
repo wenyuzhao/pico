@@ -142,6 +142,7 @@ def run(
     gen: Annotated[str | None, typer.Option("--gen")] = None,
     repl: bool = False,
 ):
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
     if (
         model_path.is_dir()
         and not (model_path / "model.safetensors").exists()
