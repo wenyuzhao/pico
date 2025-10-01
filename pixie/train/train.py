@@ -149,7 +149,7 @@ def dpo_loss(
     pi_logratios = chosen_probs - reject_probs
     ref_logratios = chosen_ref_probs - reject_ref_probs
     logits = pi_logratios - ref_logratios
-    loss = -F.logsigmoid(beta * logits)
+    loss = (logits - 1 / (2 * beta)) ** 2
     return loss.mean()
 
 
@@ -345,9 +345,8 @@ class Trainer:
                     out = self.model(X)
                     probs = logits_to_probs(out.logits, Y) * loss_mask
                     loss = dpo_loss(ref_probs, probs, loss_mask, beta=0.1)
-                    loss = loss / self.args.accumulation_steps
 
-            else:
+            elif self.args.type == "sft":
                 X, Y, loss_mask = batch
                 X = X.to(self.args.device)
                 Y = Y.to(self.args.device)
@@ -362,8 +361,23 @@ class Trainer:
                         Y.view(-1),
                         ignore_index=pad,
                     )
+                    loss = (loss * loss_mask).sum() / loss_mask.sum()
                     # loss += res.aux_loss
-                    loss = loss / self.args.accumulation_steps
+            else:
+                X, Y = batch
+                X = X.to(self.args.device)
+                Y = Y.to(self.args.device)
+
+                with self.ctx:
+                    out = self.model(X)
+                    pad = self.tokenizer.pad_token_id
+                    assert isinstance(pad, int)
+                    loss = F.cross_entropy(
+                        out.logits.view(-1, out.logits.size(-1)),
+                        Y.view(-1),
+                        ignore_index=pad,
+                    )
+            loss = loss / self.args.accumulation_steps
 
             self.scaler.scale(loss).backward()
             if self.warmup_scheduler is not None:

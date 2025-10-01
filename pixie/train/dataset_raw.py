@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 from tokenizers import processors
 from typing import Generator
@@ -63,3 +64,60 @@ def process_raw(df: pd.DataFrame, cfg: DatasetLoaderConfig) -> Generator[pd.Data
             {"input_ids": all_input_ids, "attention_mask": all_attention_masks}
         )
         yield df
+
+
+import duckdb
+import torch
+import pandas as pd
+from typing import TypedDict, cast
+from .dataset import DatasetLoaderConfig, DataPreprocessor, CHAT_TEMPLATES
+
+
+class Message(TypedDict):
+    role: str
+    content: str
+
+
+class RawDataPreprocessor(DataPreprocessor):
+    def __init__(self, cfg: DatasetLoaderConfig):
+        super().__init__(cfg)
+
+    def init(self, conn: duckdb.DuckDBPyConnection):
+        conn.execute(
+            f"""
+            CREATE TABLE dataset (
+                input_ids INTEGER[], attention_mask INTEGER[],
+                file VARCHAR, tokens INTEGER
+            )
+            """
+        )
+
+    def process_batch(self, df: pd.DataFrame) -> pd.DataFrame:
+        possible_text_columns = ["text", "content"]
+        col_name: str | None = None
+        for col in possible_text_columns:
+            if col in df.columns:
+                col_name = col
+                break
+        assert col_name is not None, "No text column found in the DataFrame."
+        samples = df[col_name]
+        tok = self.cfg._tokenizer
+        data = tok(
+            samples.to_list(),
+            max_length=self.cfg.max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+            add_special_tokens=False,
+            return_overflowing_tokens=True,
+        )
+        data = cast(dict[str, torch.Tensor], data)
+        attention_mask = data["attention_mask"].tolist()
+        df = pd.DataFrame(
+            {
+                "input_ids": data["input_ids"].tolist(),
+                "attention_mask": attention_mask,
+                "tokens": [np.count_nonzero(x) for x in attention_mask],
+            }
+        )
+        return df

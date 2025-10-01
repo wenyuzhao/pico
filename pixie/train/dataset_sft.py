@@ -1,8 +1,9 @@
+import duckdb
 import numpy as np
+import torch
 import pandas as pd
-from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
-from typing import Generator, TypedDict
-from .dataset import BATCH_SIZE, DatasetLoaderConfig
+from typing import TypedDict, cast
+from .dataset import DatasetLoaderConfig, DataPreprocessor, CHAT_TEMPLATES
 
 
 class Message(TypedDict):
@@ -10,111 +11,99 @@ class Message(TypedDict):
     content: str
 
 
-def create_chat_prompt(
-    conversations: list[list[Message]], tokenizer: PreTrainedTokenizerFast
-) -> list[str]:
-    records: list[np.ndarray[dict[str, str]]] = (  # type: ignore
-        [conversations] if isinstance(conversations[0], dict) else conversations
-    )
-    records: list[list[dict[str, str]]] = [r.tolist() if not isinstance(r, list) else r for r in records]  # type: ignore
-    # Tokenize the conversations
-    prompts = tokenizer.apply_chat_template(records, tokenize=False)
-    assert isinstance(prompts, list), "Prompts should be a list."
-    return prompts  # type: ignore
+class SFTDataPreprocessor(DataPreprocessor):
+    def __init__(self, cfg: DatasetLoaderConfig):
+        super().__init__(cfg)
 
+    def init(self, conn: duckdb.DuckDBPyConnection):
+        conn.execute(
+            f"""
+            CREATE TABLE dataset (
+                input_ids INTEGER[], attention_mask INTEGER[], assistant_mask INTEGER[],
+                file VARCHAR, tokens INTEGER
+            )
+            """
+        )
 
-def get_conversations(df: pd.DataFrame) -> list[list[Message]]:
-    conversations: list[list[Message]]
+    def get_conversations(self, df: pd.DataFrame) -> list[list[Message]]:
+        conversations: list[list[Message]]
 
-    if "conversations" in df.columns:
-        conversations = df["conversations"].to_list()  # type: ignore
-    elif "messages" in df.columns:
-        conversations = df["messages"].to_list()  # type: ignore
-    elif (
-        "instruction" in df.columns and "input" in df.columns and "output" in df.columns
-    ):
-        conversations = []
-        for instruction, input, output in zip(
-            df["instruction"], df["input"], df["output"]
+        if "conversations" in df.columns:
+            conversations = df["conversations"].to_list()  # type: ignore
+        elif "messages" in df.columns:
+            conversations = df["messages"].to_list()  # type: ignore
+        elif (
+            "instruction" in df.columns
+            and "input" in df.columns
+            and "output" in df.columns
         ):
-            if input and len(input) > 0:
-                conversations.append(
-                    [
-                        {"role": "user", "content": instruction + "\n\n" + input},
-                        {"role": "assistant", "content": output},
-                    ]
-                )
-            else:
-                conversations.append(
-                    [
-                        {"role": "user", "content": instruction},
-                        {"role": "assistant", "content": output},
-                    ]
-                )
-    else:
-        raise ValueError("Invalid format")
+            conversations = []
+            for instruction, input, output in zip(
+                df["instruction"], df["input"], df["output"]
+            ):
+                if input and len(input) > 0:
+                    conversations.append(
+                        [
+                            {"role": "user", "content": instruction + "\n\n" + input},
+                            {"role": "assistant", "content": output},
+                        ]
+                    )
+                else:
+                    conversations.append(
+                        [
+                            {"role": "user", "content": instruction},
+                            {"role": "assistant", "content": output},
+                        ]
+                    )
+        else:
+            raise ValueError("Invalid format")
 
-    assert isinstance(conversations, list)
-    assert isinstance(conversations[0], list)
-    assert isinstance(conversations[0][0], dict)
+        assert isinstance(conversations, list)
+        assert isinstance(conversations[0], list)
+        assert isinstance(conversations[0][0], dict)
 
-    # Fix field names
-    alt_role_keys = ["from"]
-    role_mapping: dict[str, str] = {"human": "user", "gpt": "assistant"}
-    alt_content_keys = ["value"]
-    for msgs in conversations:
-        for x in msgs:
-            for key in alt_role_keys:
-                if key in x and "role" not in x:
-                    x["role"] = x[key]
-                    del x[key]
-            x["role"] = role_mapping.get(x["role"], x["role"])
-            for key in alt_content_keys:
-                if key in x and "content" not in x:
-                    x["content"] = x[key]
-                    del x[key]
+        # Fix field names
+        alt_role_keys = ["from"]
+        role_mapping: dict[str, str] = {"human": "user", "gpt": "assistant"}
+        alt_content_keys = ["value"]
+        for msgs in conversations:
+            for x in msgs:
+                for key in alt_role_keys:
+                    if key in x and "role" not in x:
+                        x["role"] = x[key]
+                        del x[key]
+                x["role"] = role_mapping.get(x["role"], x["role"])
+                for key in alt_content_keys:
+                    if key in x and "content" not in x:
+                        x["content"] = x[key]
+                        del x[key]
 
-    return conversations
+        return conversations
 
-
-def process_sft(df: pd.DataFrame, cfg: DatasetLoaderConfig) -> Generator[pd.DataFrame]:
-    conversations: list[list[Message]] = get_conversations(df)
-
-    tok = cfg._tokenizer
-    samples = create_chat_prompt(conversations, tok)
-    # Do it batched
-    for i in range(0, len(samples), BATCH_SIZE):
-        print(f"       . {i} / {len(samples)}", flush=True)
-        max_index = min(i + BATCH_SIZE, len(samples))
-        slice = samples[i:max_index]
-        encoding = tok(
-            slice,
-            max_length=cfg.max_length,
+    def process_batch(self, df: pd.DataFrame) -> pd.DataFrame:
+        samples = self.get_conversations(df)
+        tok = self.cfg._tokenizer
+        data = tok.apply_chat_template(
+            cast(list[list[dict[str, str]]], samples),
+            tokenize=True,
+            # add_generation_prompt=True,
+            return_assistant_tokens_mask=True,
+            return_dict=True,
+            chat_template=CHAT_TEMPLATES.get(tok.name_or_path, ""),
+            max_length=self.cfg.max_length,
             padding="max_length",
             truncation=True,
             return_tensors="pt",
-            add_special_tokens=cfg.add_special_tokens,
+            add_special_tokens=self.cfg.add_special_tokens,
         )
-        all_input_ids = []
-        all_attention_masks = []
-        pad = tok.pad_token_id
-        assert pad is not None, "Tokenizer must have a pad token."
-        end = tok.eos_token_id
-        assert end is not None, "Tokenizer must have an eos token."
-        for input_ids, attention_mask in zip(
-            encoding.input_ids, encoding.attention_mask
-        ):
-            input_ids = input_ids.squeeze().numpy()
-            last_token = input_ids[-1]
-            if last_token != end and last_token != pad:
-                continue
-            attention_mask = attention_mask.squeeze().numpy()
-            # truncate
-            input_ids = input_ids[: cfg.max_length]
-            attention_mask = attention_mask[: cfg.max_length]
-            all_input_ids.append(input_ids)
-            all_attention_masks.append(attention_mask)
+        data = cast(dict[str, torch.Tensor], data)
+        attention_mask = data["attention_mask"].tolist()
         df = pd.DataFrame(
-            {"input_ids": all_input_ids, "attention_mask": all_attention_masks}
+            {
+                "input_ids": data["input_ids"].tolist(),
+                "attention_mask": attention_mask,
+                "assistant_mask": data["assistant_mask"].tolist(),
+                "tokens": [np.count_nonzero(x) for x in attention_mask],
+            }
         )
-        yield df
+        return df
