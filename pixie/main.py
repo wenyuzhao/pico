@@ -64,13 +64,9 @@ def sft(
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    if ckpt.is_dir():
-        config = Config.load(ckpt / "config.yaml")
-        assert config.sft is not None, "SFT configuration is missing."
-    else:
-        assert ckpt.suffix == ".pth", "Checkpoint must be a .pth file."
-        config = Config.load(ckpt.parent / "config.yaml")
-        assert config.sft is not None, "SFT configuration is missing."
+    assert ckpt.is_dir()
+    config = Config.load(ckpt / "config.yaml")
+    assert config.sft is not None, "SFT configuration is missing."
     trainer = Trainer(
         config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="sft"
     )
@@ -85,13 +81,9 @@ def dpo(
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    if ckpt.is_dir():
-        config = Config.load(ckpt / "config.yaml")
-        assert config.dpo is not None, "DPO configuration is missing."
-    else:
-        assert ckpt.suffix == ".pth", "Checkpoint must be a .pth file."
-        config = Config.load(ckpt.parent / "config.yaml")
-        assert config.dpo is not None, "DPO configuration is missing."
+    assert ckpt.is_dir()
+    config = Config.load(ckpt / "config.yaml")
+    assert config.dpo is not None, "DPO configuration is missing."
     trainer = Trainer(
         config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="dpo"
     )
@@ -156,9 +148,16 @@ def run(
         and (model_path / "latest" / "model.safetensors").exists()
     ):
         model_path = model_path / "latest"
-    assert (
-        model_path / "model.safetensors"
-    ).exists(), f"Model not found in {model_path}"
+    if model_path.is_dir():
+        assert (
+            model_path / "model.safetensors"
+        ).exists(), f"Model not found in {model_path}"
+    else:
+        assert model_path.suffix in [
+            ".safetensors",
+            ".pth",
+            ".pt",
+        ], "Invalid model file."
     run_type: Literal["chat", "gen", "repl"]
     if repl:
         assert chat is None, "--chat should not be provided in REPL mode."

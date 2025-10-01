@@ -21,6 +21,7 @@ import wandb
 import torch.nn.functional as F
 import pytorch_warmup as warmup
 import git
+import shutil
 
 
 class TrainingArgs(BaseModel):
@@ -233,6 +234,7 @@ class Trainer:
             if self.args.warmup_steps
             else None
         )
+        self.save_tokenizer()
 
     def init_model(self):
         tokenizer = self.config.load_tokenizer()
@@ -416,22 +418,18 @@ class Trainer:
 
     def save_model(self, epoch: int | None = None):
         self.model.eval()
+
+        self.model.save_pretrained(self.save_dir, safe_serialization=True)
         if epoch is not None:
-            ckp = self.save_dir / f"model-{epoch}.pth"
-        else:
-            ckp = self.save_dir / f"model.pth"
+            # copy model.safetensors to model-{epoch}.safetensors
+            latest_ckp = self.save_dir / f"model-{epoch}.safetensors"
+            latest_ckp.unlink(missing_ok=True)
+            shutil.copy(self.save_dir / "model.safetensors", latest_ckp)
 
-        if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
-            state_dict = self.model.module.state_dict()
-        else:
-            state_dict = self.model.state_dict()
-
-        state_dict = {k: v.half() for k, v in state_dict.items()}
-        torch.save(state_dict, ckp)
-        if epoch is None:
-            self.model.save_pretrained(self.save_dir, safe_serialization=True)  # type: ignore
-            self.tokenizer.save_pretrained(self.save_dir, save_jinja_files=False)
         self.model.train()
+
+    def save_tokenizer(self):
+        self.tokenizer.save_pretrained(self.save_dir, save_jinja_files=False)
 
     def train(self):
         for epoch in range(self.args.epochs):
