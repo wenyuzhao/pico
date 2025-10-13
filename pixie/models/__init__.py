@@ -16,6 +16,7 @@ class BaseGPTModel(PreTrainedModel, GenerationMixin):
         super().__init__(PretrainedConfig(**config.to_dict()))
         assert self.generation_config
         gcfg = self.model_config.generation
+        self.config.model_type = config.name
         self.generation_config.max_new_tokens = gcfg.max_new_tokens
         self.generation_config.do_sample = gcfg.do_sample
         self.generation_config.temperature = gcfg.temperature

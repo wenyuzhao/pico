@@ -1,6 +1,6 @@
 model:
   name: pixie
-  tokenizer: microsoft/phi-4
+  tokenizer: jingyaogong/MiniMind2
   hidden_size: 512
   num_hidden_layers: 8
   hidden_act: silu
@@ -19,42 +19,37 @@ model:
     use_cache: false
 
 pretrain:
-  dataset:
-    path: datasets/pile
-    limit: 1048576
-  context_length: 1024
-  batch_size: 4
+  dataset: datasets/minimind/pretrain_hq.jsonl
+  context_length: 512
+  batch_size: 64
   epochs: 1
   grad_clip: 1.0
-  warmup_steps: 400
-  accumulation_steps: 16
+  warmup_steps: 100
+  accumulation_steps: 1
   optimizer:
-    name: lion
-    learning_rate: 1e-4
-    weight_decay: 0.01
+    name: adamw
+    learning_rate: 5e-4
 
 sft:
-  dataset: datasets/alpaca
-  context_length: 1024
-  batch_size: 4
-  epochs: 5
+  dataset: datasets/minimind/sft_mini_512.jsonl
+  context_length: 512
+  batch_size: 64
+  epochs: 2
   grad_clip: 1.0
   warmup_steps: 100
-  accumulation_steps: 16
+  accumulation_steps: 1
   optimizer:
-    name: lion
-    learning_rate: 1e-4
-    weight_decay: 0.01
+    name: adamw
+    learning_rate: 5e-4
 
 dpo:
-  dataset: datasets/magpielm-dpo-data-v0.1
+  dataset: datasets/minimind/dpo.jsonl
   context_length: 1024
-  batch_size: 4
-  epochs: 5
+  batch_size: 14
+  epochs: 2
   grad_clip: 1.0
   warmup_steps: 100
-  accumulation_steps: 16
+  accumulation_steps: 1
   optimizer:
-    name: lion
-    learning_rate: 1e-4
-    weight_decay: 0.01
+    name: adamw
+    learning_rate: 5e-4

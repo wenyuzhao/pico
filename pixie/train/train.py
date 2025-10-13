@@ -22,6 +22,7 @@ import torch.nn.functional as F
 import pytorch_warmup as warmup
 import git
 import shutil
+from safetensors.torch import load_model
 
 
 class TrainingArgs(BaseModel):
@@ -89,7 +90,7 @@ class TrainingArgs(BaseModel):
                 checkpoint is None
             ), "Checkpoint must not be provided for pretraining."
         if checkpoint and checkpoint.is_dir():
-            checkpoint = checkpoint / "model.pth"
+            checkpoint = checkpoint / "model.safetensors"
             assert checkpoint.exists(), f"Checkpoint not found: {checkpoint}"
         return TrainingArgs(
             context_length=cfg.context_length,
@@ -101,7 +102,7 @@ class TrainingArgs(BaseModel):
             gradient_checkpointing=cfg.gradient_checkpointing,
             optimizer=optimizer,
             dataset=dataset,
-            checkpoint=str(checkpoint),
+            checkpoint=str(checkpoint) if checkpoint else None,
             wandb=wandb,
             type=type,
             config=config,
@@ -239,31 +240,36 @@ class Trainer:
     def init_model(self):
         tokenizer = self.config.load_tokenizer()
         model = self.config.load_model()
-        model = torch.compile(model, mode="default").to(self.args.device)  # type: ignore
         print(
             f"Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} M"
         )
-        if self.args.gradient_checkpointing:
-            model.gradient_checkpointing_enable()
         if self.args.checkpoint is not None:
-            model.load_state_dict(
-                torch.load(self.args.checkpoint, map_location=self.args.device),
-                strict=True,
+            missing, unexpected = load_model(
+                model, self.args.checkpoint, device=self.args.device
             )
+            if missing or unexpected:
+                raise ValueError(
+                    f"Failed to load model: missing keys: {missing}, unexpected keys: {unexpected}"
+                )
             if self.args.checkpoint_epoch is not None:
                 print(
                     f"Loaded checkpoint from {self.args.checkpoint} (epoch: {self.args.checkpoint_epoch})"
                 )
             else:
                 print(f"Loaded checkpoint from {self.args.checkpoint}")
+        model = torch.compile(model, mode="default").to(self.args.device)  # type: ignore
+        if self.args.gradient_checkpointing:
+            model.gradient_checkpointing_enable()
         if self.args.type == "dpo":
             ref_model = self.config.load_model()
-            ref_model = torch.compile(ref_model, mode="default").to(self.args.device)  # type: ignore
             assert self.args.checkpoint is not None
-            ref_model.load_state_dict(
-                torch.load(self.args.checkpoint, map_location=self.args.device),
-                strict=True,
+            missing, unexpected = load_model(
+                ref_model, self.args.checkpoint, device=self.args.device
             )
+            assert (
+                not missing and not unexpected
+            ), f"Failed to load reference model: missing keys: {missing}, unexpected keys: {unexpected}"
+            ref_model = torch.compile(ref_model, mode="default").to(self.args.device)  # type: ignore
             ref_model.eval()
             ref_model.requires_grad_(False)
         else:

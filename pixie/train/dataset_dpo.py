@@ -33,8 +33,12 @@ class DPODataPreprocessor(DataPreprocessor):
         assert "chosen" in df.columns, "DataFrame must contain 'chosen' column."
         assert "rejected" in df.columns, "DataFrame must contain 'rejected' column."
 
-        chosen = [x.tolist() for x in df["chosen"].to_list()]
-        rejected = [x.tolist() for x in df["rejected"].to_list()]
+        chosen = [
+            x if isinstance(x, list) else x.tolist() for x in df["chosen"].to_list()
+        ]
+        rejected = [
+            x if isinstance(x, list) else x.tolist() for x in df["rejected"].to_list()
+        ]
 
         return cast(list[list[Message]], chosen), cast(list[list[Message]], rejected)  # type: ignore
 

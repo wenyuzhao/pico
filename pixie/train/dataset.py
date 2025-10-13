@@ -14,6 +14,7 @@ from typing import Generator
 
 CHAT_TEMPLATES = {
     "microsoft/phi-4": "{% for message in messages %}{% if (message['role'] == 'system') %}{{'<|im_start|>system<|im_sep|>' + message['content'] + '<|im_end|>'}}{% elif (message['role'] == 'user') %}{{'<|im_start|>user<|im_sep|>' + message['content'] + '<|im_end|>'}}{% elif (message['role'] == 'assistant') %}<|im_start|>assistant<|im_sep|>{% generation %}{{message['content']}}<|im_end|>{% endgeneration %}{% endif %}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant<|im_sep|>' }}{% endif %}",
+    "jingyaogong/MiniMind2": "{% if messages[0]['role'] == 'system' %}{% set system_message = messages[0]['content'] %}{{ '<|im_start|>system\\n' + system_message + '<|im_end|>\\n' }}{% else %}{{ '<|im_start|>system\\nYou are a helpful assistant<|im_end|>\\n' }}{% endif %}{% for message in messages %}{% set content = message['content'] %}{% if message['role'] == 'user' %}{{ '<|im_start|>user\\n' + content + '<|im_end|>\\n<|im_start|>assistant\\n' }}{% elif message['role'] == 'assistant' %}{% generation %}{{ content + '<|im_end|>' + '\\n' }}{% endgeneration %}{% endif %}{% endfor %}",
 }
 
 
@@ -75,8 +76,10 @@ class DuckDBDataset(Dataset):
             ).fetchone()
             if not result:
                 raise IndexError(f"Index {index} out of range.")
-            input_ids = result
-            assert len(input_ids) == self.max_length
+            input_ids = result[0]
+            assert (
+                len(input_ids) == self.max_length
+            ), f"Expected input_ids length {self.max_length}, got {len(input_ids)}"
             X = torch.tensor(input_ids[:-1], dtype=torch.long)
             Y = torch.tensor(input_ids[1:], dtype=torch.long)
             return X, Y
@@ -283,7 +286,9 @@ def preprocess(
 
     match type:
         case "pretrain":
-            raise NotImplementedError("Use preprocess_dataset instead.")
+            from .dataset_raw import RawDataPreprocessor
+
+            preprocessor = RawDataPreprocessor(cfg)
         case "sft":
             from .dataset_sft import SFTDataPreprocessor
 
