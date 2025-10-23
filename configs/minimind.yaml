@@ -52,4 +52,4 @@ dpo:
   accumulation_steps: 1
   optimizer:
     name: adamw
-    learning_rate: 5e-4
+    learning_rate: 1.0e-08
