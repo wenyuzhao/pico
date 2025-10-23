@@ -2,13 +2,14 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal
 import typer
-from .config import Config
-from .models import BaseGPTModel
+from pixie.models import Config
+from models import BaseGPTModel
 from .run import run_model
 from pixie.train.train import Trainer
 import pixie.train.dataset as dataset
 import warnings
 import dotenv
+from . import utils
 
 warnings.filterwarnings("ignore")
 
@@ -23,8 +24,8 @@ app = typer.Typer(
 
 @app.command(help="Prints information about the model.")
 def info(config_name: str, verbose: bool = False):
-    config = Config.load(f"configs/{config_name}.yaml")
-    model = BaseGPTModel.load(config.model)
+    config = utils.load_config(f"configs/{config_name}.yaml")
+    model = utils.load_model(config.model)
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[{config_name}]")
     print(f"Model: {config.model.name}")
@@ -49,7 +50,7 @@ def pretrain(
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
-    config = Config.load(f"configs/{config_name}.yaml")
+    config = utils.load_config(f"configs/{config_name}.yaml")
     trainer = Trainer(
         config, project=proj, checkpoint=None, use_wandb=wandb, train_type="pretrain"
     )
@@ -65,7 +66,7 @@ def sft(
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
-    config = Config.load(ckpt / "config.yaml")
+    config = utils.load_config(ckpt / "config.yaml")
     assert config.sft is not None, "SFT configuration is missing."
     trainer = Trainer(
         config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="sft"
@@ -82,7 +83,7 @@ def dpo(
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
-    config = Config.load(ckpt / "config.yaml")
+    config = utils.load_config(ckpt / "config.yaml")
     assert config.dpo is not None, "DPO configuration is missing."
     trainer = Trainer(
         config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="dpo"

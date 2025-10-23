@@ -8,7 +8,7 @@ from torch import optim
 from torch.utils.data import DataLoader
 from contextlib import nullcontext
 import yaml
-from pixie.config import (
+from pixie.models import (
     DatasetConfig,
     Config,
     AdamWOptimizerConfig,
@@ -23,6 +23,7 @@ import pytorch_warmup as warmup
 import git
 import shutil
 from safetensors.torch import load_model
+from .. import utils
 
 
 class TrainingArgs(BaseModel):
@@ -198,7 +199,7 @@ class Trainer:
             latest.unlink()
         latest.symlink_to(self.save_dir.resolve(), target_is_directory=True)
         # Load and save model configs
-        self.config.save(self.save_dir / "config.yaml")
+        utils.save_config(self.config, self.save_dir / "config.yaml")
         args_to_save = self.args.model_dump()
         del args_to_save["config"]
         (self.save_dir / "args.yaml").write_text(yaml.safe_dump(args_to_save))
@@ -238,8 +239,8 @@ class Trainer:
         self.save_tokenizer()
 
     def init_model(self):
-        tokenizer = self.config.load_tokenizer()
-        model = self.config.load_model()
+        tokenizer = self.config.model.load_tokenizer()
+        model = utils.load_model(self.config.model)
         print(
             f"Total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad) / 1e6:.3f} M"
         )
@@ -261,7 +262,7 @@ class Trainer:
         if self.args.gradient_checkpointing:
             model.gradient_checkpointing_enable()
         if self.args.type == "dpo":
-            ref_model = self.config.load_model()
+            ref_model = utils.load_model(self.config.model)
             assert self.args.checkpoint is not None
             missing, unexpected = load_model(
                 ref_model, self.args.checkpoint, device=self.args.device

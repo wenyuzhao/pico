@@ -4,8 +4,7 @@ from torch.nn import RMSNorm
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from ..config import ModelConfig, PretrainedConfig
-from . import BaseGPTModel, register_model
+from . import BaseGPTModel, register_model, ModelConfig, PretrainedConfig
 
 
 class PixieConfig(ModelConfig): ...
@@ -225,7 +224,7 @@ class Transformer(nn.Module):
 
 
 @register_model("pixie", PixieConfig)
-class Pixie(BaseGPTModel):
+class Pixie(BaseGPTModel[PixieConfig]):
     def __init__(self, config: PixieConfig | PretrainedConfig):
         config = PixieConfig.cast(config)
         super().__init__(config)
