@@ -15,7 +15,8 @@ from pixie.models import (
     LionOptimizerConfig,
 )
 from lion_pytorch import Lion
-from .dataset import DuckDBDataset
+
+from pixie.train import pretrain, sft, dpo
 from torch.utils.data import Dataset
 import wandb
 import torch.nn.functional as F
@@ -126,36 +127,6 @@ class TrainingArgs(BaseModel):
             assert self.checkpoint is not None
 
 
-def logits_to_probs(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    # logits: [batch_size, seq_len, vocab_size]
-    # labels: [batch_size, seq_len]
-    log_probs = F.log_softmax(logits, dim=2)
-    probs = torch.gather(log_probs, dim=2, index=labels.unsqueeze(2)).squeeze(-1)
-    return probs  # [batch_size, seq_len]
-
-
-def dpo_loss(
-    ref_probs: torch.Tensor, probs: torch.Tensor, mask: torch.Tensor, beta: float
-) -> torch.Tensor:
-    # ref_probs, probs: [batch_size, seq_len]
-    # https://github.com/jingyaogong/minimind/issues/298
-    seq_lengths = mask.sum(dim=1, keepdim=True)  # (batch_size, 1)
-    ref_probs = (ref_probs * mask).sum(dim=1) / seq_lengths.squeeze()
-    probs = (probs * mask).sum(dim=1) / seq_lengths.squeeze()
-
-    batch_size = ref_probs.shape[0]
-    chosen_ref_probs = ref_probs[: batch_size // 2]
-    reject_ref_probs = ref_probs[batch_size // 2 :]
-    chosen_probs = probs[: batch_size // 2]
-    reject_probs = probs[batch_size // 2 :]
-
-    pi_logratios = chosen_probs - reject_probs
-    ref_logratios = chosen_ref_probs - reject_ref_probs
-    logits = pi_logratios - ref_logratios
-    loss = (logits - 1 / (2 * beta)) ** 2
-    return loss.mean()
-
-
 class Trainer:
     def __init__(
         self,
@@ -217,7 +188,7 @@ class Trainer:
                 project=wandb_proj, name=self.runid, config=self.args.model_dump()
             )
         # Initialize model, tokenizer, and data loader
-        self.model, self.tokenizer, self.ref_model = self.init_model()
+        self.tokenizer, self.model, self.loss = self.init_model()
         self.data_loader = self.init_data_loader()
         self.iter_per_epoch = len(self.data_loader)
         self.scaler = torch.amp.grad_scaler.GradScaler(
@@ -261,29 +232,42 @@ class Trainer:
         model = torch.compile(model, mode="default").to(self.args.device)  # type: ignore
         if self.args.gradient_checkpointing:
             model.gradient_checkpointing_enable()
-        if self.args.type == "dpo":
-            ref_model = utils.load_model(self.config.model)
-            assert self.args.checkpoint is not None
-            missing, unexpected = load_model(
-                ref_model, self.args.checkpoint, device=self.args.device
-            )
-            assert (
-                not missing and not unexpected
-            ), f"Failed to load reference model: missing keys: {missing}, unexpected keys: {unexpected}"
-            ref_model = torch.compile(ref_model, mode="default").to(self.args.device)  # type: ignore
-            ref_model.eval()
-            ref_model.requires_grad_(False)
-        else:
-            ref_model = None
-        return model, tokenizer, ref_model
+        match self.args.type:
+            case "pretrain":
+                loss = pretrain.PretrainLoss(self.args.device, model)
+            case "sft":
+                loss = sft.SFTLoss(self.args.device, model)
+            case "dpo":
+                ref_model = utils.load_model(self.config.model)
+                assert self.args.checkpoint is not None
+                missing, unexpected = load_model(
+                    ref_model, self.args.checkpoint, device=self.args.device
+                )
+                assert (
+                    not missing and not unexpected
+                ), f"Failed to load reference model: missing keys: {missing}, unexpected keys: {unexpected}"
+                ref_model = torch.compile(ref_model, mode="default").to(self.args.device)  # type: ignore
+                ref_model.eval()
+                ref_model.requires_grad_(False)
+                assert self.args.config.dpo is not None
+                loss = dpo.DPOLoss(
+                    self.args.device, model, ref_model, beta=self.args.config.dpo.beta
+                )
+        return tokenizer, model, loss
 
     def init_data_loader(self):
         train_ds: Dataset
-        train_ds = DuckDBDataset(
+        match self.args.type:
+            case "pretrain":
+                DatasetImpl = pretrain.PretrainDataset
+            case "sft":
+                DatasetImpl = sft.SFTDataset
+            case "dpo":
+                DatasetImpl = dpo.DPODataset
+        train_ds = DatasetImpl(
             self.args.dataset.path,
             self.tokenizer,
             max_length=self.args.context_length,
-            type=self.args.type,
             limit=self.args.dataset.limit,
         )
         return DataLoader(
@@ -337,58 +321,9 @@ class Trainer:
     def train_epoch(self, epoch: int):
         start_time = time.time()
         for step, batch in enumerate(self.data_loader):
-            if self.args.type == "dpo":
-                chosen_x = batch["chosen_x"].to(self.args.device)
-                chosen_y = batch["chosen_y"].to(self.args.device)
-                chosen_mask = batch["chosen_mask"].to(self.args.device)
-                rejected_x = batch["rejected_x"].to(self.args.device)
-                rejected_y = batch["rejected_y"].to(self.args.device)
-                rejected_mask = batch["rejected_mask"].to(self.args.device)
+            with self.ctx:
+                loss = self.loss(batch)
 
-                X = torch.cat([chosen_x, rejected_x], dim=0)
-                Y = torch.cat([chosen_y, rejected_y], dim=0)
-                loss_mask = torch.cat([chosen_mask, rejected_mask], dim=0)
-
-                with self.ctx:
-                    with torch.no_grad():
-                        assert self.ref_model is not None
-                        ref_out = self.ref_model(X)
-                    ref_probs = logits_to_probs(ref_out.logits, Y) * loss_mask
-                    out = self.model(X)
-                    probs = logits_to_probs(out.logits, Y) * loss_mask
-                    loss = dpo_loss(ref_probs, probs, loss_mask, beta=0.1)
-
-            elif self.args.type == "sft":
-                X, Y, loss_mask = batch
-                X = X.to(self.args.device)
-                Y = Y.to(self.args.device)
-                loss_mask = loss_mask.to(self.args.device)
-
-                with self.ctx:
-                    out = self.model(X)
-                    pad = self.tokenizer.pad_token_id
-                    assert isinstance(pad, int)
-                    loss = F.cross_entropy(
-                        out.logits.view(-1, out.logits.size(-1)),
-                        Y.view(-1),
-                        ignore_index=pad,
-                    )
-                    loss = (loss * loss_mask).sum() / loss_mask.sum()
-                    # loss += res.aux_loss
-            else:
-                X, Y = batch
-                X = X.to(self.args.device)
-                Y = Y.to(self.args.device)
-
-                with self.ctx:
-                    out = self.model(X)
-                    pad = self.tokenizer.pad_token_id
-                    assert isinstance(pad, int)
-                    loss = F.cross_entropy(
-                        out.logits.view(-1, out.logits.size(-1)),
-                        Y.view(-1),
-                        ignore_index=pad,
-                    )
             loss = loss / self.args.accumulation_steps
 
             self.scaler.scale(loss).backward()

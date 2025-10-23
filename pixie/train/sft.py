@@ -2,8 +2,13 @@ import duckdb
 import numpy as np
 import torch
 import pandas as pd
-from typing import TypedDict, cast
-from .dataset import DatasetLoaderConfig, DataPreprocessor, CHAT_TEMPLATES
+from typing import TypedDict, cast, override
+from .dataset import (
+    DataPreprocessor,
+    CHAT_TEMPLATES,
+    DuckDBDataset,
+)
+from .pretrain import PretrainLoss
 
 
 class Message(TypedDict):
@@ -12,9 +17,7 @@ class Message(TypedDict):
 
 
 class SFTDataPreprocessor(DataPreprocessor):
-    def __init__(self, cfg: DatasetLoaderConfig):
-        super().__init__(cfg)
-
+    @override
     def init(self, conn: duckdb.DuckDBPyConnection):
         conn.execute(
             f"""
@@ -25,7 +28,7 @@ class SFTDataPreprocessor(DataPreprocessor):
             """
         )
 
-    def get_conversations(self, df: pd.DataFrame) -> list[list[Message]]:
+    def _get_conversations(self, df: pd.DataFrame) -> list[list[Message]]:
         conversations: list[list[Message]]
 
         if "conversations" in df.columns:
@@ -80,8 +83,9 @@ class SFTDataPreprocessor(DataPreprocessor):
 
         return conversations
 
+    @override
     def process_batch(self, df: pd.DataFrame) -> pd.DataFrame:
-        samples = self.get_conversations(df)
+        samples = self._get_conversations(df)
         tok = self.cfg._tokenizer
         data = tok.apply_chat_template(
             cast(list[list[dict[str, str]]], samples),
@@ -107,3 +111,24 @@ class SFTDataPreprocessor(DataPreprocessor):
             }
         )
         return df
+
+
+class SFTDataset(DuckDBDataset):
+    @override
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        result = self.conn.execute(
+            "SELECT input_ids, assistant_mask FROM dataset LIMIT 1 OFFSET ?",
+            (index,),
+        ).fetchone()
+        if not result:
+            raise IndexError(f"Index {index} out of range.")
+        input_ids, assistant_mask = result
+        assert len(input_ids) == self.max_length
+        assert len(assistant_mask) == self.max_length
+        X = torch.tensor(input_ids[:-1], dtype=torch.long)
+        Y = torch.tensor(input_ids[1:], dtype=torch.long)
+        loss_mask = torch.tensor(assistant_mask[1:], dtype=torch.long)
+        return {"x": X, "y": Y, "loss_mask": loss_mask}
+
+
+class SFTLoss(PretrainLoss): ...

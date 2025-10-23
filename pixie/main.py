@@ -2,8 +2,6 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal
 import typer
-from pixie.models import Config
-from models import BaseGPTModel
 from .run import run_model
 from pixie.train.train import Trainer
 import pixie.train.dataset as dataset

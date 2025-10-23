@@ -37,7 +37,7 @@ sft:
   dataset: datasets/alpaca
   context_length: 1024
   batch_size: 4
-  epochs: 5
+  epochs: 2
   grad_clip: 1.0
   warmup_steps: 100
   accumulation_steps: 16
@@ -50,7 +50,7 @@ dpo:
   dataset: datasets/magpielm-dpo-data-v0.1
   context_length: 1024
   batch_size: 4
-  epochs: 5
+  epochs: 2
   grad_clip: 1.0
   warmup_steps: 100
   accumulation_steps: 16

@@ -24,7 +24,6 @@ class DuckDBDataset(Dataset):
         path: str | Path,
         tokenizer: PreTrainedTokenizerFast,
         max_length: int,
-        type: Literal["pretrain", "sft", "dpo"],
         limit: int | None = None,
     ):
         super().__init__()
@@ -63,66 +62,11 @@ class DuckDBDataset(Dataset):
             assert r, "No records found in the dataset."
             print(f"Using the entire dataset with {self.len} records ({r[0]} tokens).")
 
-        self.type = type
-
     def __len__(self):
         return self.len
 
-    def __getitem__(self, index: int):
-        if self.type == "pretrain":
-            result = self.conn.execute(
-                "SELECT input_ids FROM dataset LIMIT 1 OFFSET ?",
-                (index,),
-            ).fetchone()
-            if not result:
-                raise IndexError(f"Index {index} out of range.")
-            input_ids = result[0]
-            assert (
-                len(input_ids) == self.max_length
-            ), f"Expected input_ids length {self.max_length}, got {len(input_ids)}"
-            X = torch.tensor(input_ids[:-1], dtype=torch.long)
-            Y = torch.tensor(input_ids[1:], dtype=torch.long)
-            return X, Y
-        elif self.type == "sft":
-            result = self.conn.execute(
-                "SELECT input_ids, assistant_mask FROM dataset LIMIT 1 OFFSET ?",
-                (index,),
-            ).fetchone()
-            if not result:
-                raise IndexError(f"Index {index} out of range.")
-            input_ids, assistant_mask = result
-            assert len(input_ids) == self.max_length
-            assert len(assistant_mask) == self.max_length
-            X = torch.tensor(input_ids[:-1], dtype=torch.long)
-            Y = torch.tensor(input_ids[1:], dtype=torch.long)
-            loss_mask = torch.tensor(assistant_mask[1:], dtype=torch.long)
-            return X, Y, loss_mask
-        else:
-            result = self.conn.execute(
-                "SELECT chosen, chosen_assistant_mask, rejected, rejected_assistant_mask FROM dataset LIMIT 1 OFFSET ?",
-                (index,),
-            ).fetchone()
-            if not result:
-                raise IndexError(f"Index {index} out of range.")
-            chosen, chosen_mask, rejected, rejected_mask = result
-            assert len(chosen) == self.max_length
-            assert len(chosen_mask) == self.max_length
-            assert len(rejected) == self.max_length
-            assert len(rejected_mask) == self.max_length
-            chosen_x = torch.tensor(chosen[:-1], dtype=torch.long)
-            chosen_y = torch.tensor(chosen[1:], dtype=torch.long)
-            chosen_loss_mask = torch.tensor(chosen_mask[1:], dtype=torch.long)
-            rejected_x = torch.tensor(rejected[:-1], dtype=torch.long)
-            rejected_y = torch.tensor(rejected[1:], dtype=torch.long)
-            rejected_loss_mask = torch.tensor(rejected_mask[1:], dtype=torch.long)
-            return {
-                "chosen_x": chosen_x,
-                "chosen_y": chosen_y,
-                "chosen_mask": chosen_loss_mask,
-                "rejected_x": rejected_x,
-                "rejected_y": rejected_y,
-                "rejected_mask": rejected_loss_mask,
-            }
+    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        raise NotImplementedError()
 
 
 BATCH_SIZE = 20000
@@ -275,31 +219,25 @@ class DataPreprocessor:
             print(f"  Samples: {total_samples}", flush=True)
             print(f"  Tokens: {total_tokens} ({total_tokens / 1e9:.3f} B)", flush=True)
 
+    @classmethod
+    def get_item(cls, conn: duckdb.DuckDBPyConnection, index: int):
+        raise NotImplementedError()
+
 
 def preprocess(
     data_path: Path, cfg: DatasetLoaderConfig, type: Literal["pretrain", "sft", "dpo"]
 ):
+    from . import pretrain, sft, dpo
+
     if not data_path.exists():
         raise FileNotFoundError(f"Path {data_path} does not exist.")
-
-    preprocessor: DataPreprocessor
-
     match type:
         case "pretrain":
-            from .dataset_raw import RawDataPreprocessor
-
-            preprocessor = RawDataPreprocessor(cfg)
+            preprocessor = pretrain.PretrainDataPreprocessor(cfg)
         case "sft":
-            from .dataset_sft import SFTDataPreprocessor
-
-            preprocessor = SFTDataPreprocessor(cfg)
+            preprocessor = sft.SFTDataPreprocessor(cfg)
         case "dpo":
-            from .dataset_dpo import DPODataPreprocessor
-
-            preprocessor = DPODataPreprocessor(cfg)
-        case _:
-            raise ValueError(f"Unsupported dataset type: {type}")
-
+            preprocessor = dpo.DPODataPreprocessor(cfg)
     preprocessor.process_all(data_path)
 
 

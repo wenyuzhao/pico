@@ -99,7 +99,8 @@ class PretrainConfig(BaseTrainingConfig): ...
 class SFTConfig(BaseTrainingConfig): ...
 
 
-class DPOConfig(BaseTrainingConfig): ...
+class DPOConfig(BaseTrainingConfig):
+    beta: float = 0.1
 
 
 class Config(BaseModel):
