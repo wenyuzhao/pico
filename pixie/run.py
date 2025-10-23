@@ -51,7 +51,7 @@ def run_model(
     type: Literal["chat", "gen", "repl"],
 ):
     tok = AutoTokenizer.from_pretrained(path)
-    pl = pipeline(task="text-generation", model=str(path))
+    pl = pipeline(task="text-generation", model=str(path), trust_remote_code=True)
 
     if type != "repl":
         assert prompt is not None, "Prompt must be provided if not in REPL mode."
