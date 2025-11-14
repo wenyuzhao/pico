@@ -88,6 +88,7 @@ class PretrainLoss(torch.nn.Module):
         loss = F.cross_entropy(
             out.logits.view(-1, out.logits.size(-1)),
             Y.view(-1),
-        )
+            reduction="none",
+        ).view(Y.size())
         loss = (loss * mask).sum() / mask.sum()
         return loss
