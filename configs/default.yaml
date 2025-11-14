@@ -32,7 +32,7 @@ pretrain:
   epochs: 1
   grad_clip: 1.0
   warmup_steps: 400
-  accumulation_steps: 16
+  accumulation_steps: 8
   optimizer:
     name: lion
     learning_rate: 1e-4
@@ -45,7 +45,7 @@ sft:
   epochs: 2
   grad_clip: 1.0
   warmup_steps: 100
-  accumulation_steps: 16
+  accumulation_steps: 8
   optimizer:
     name: lion
     learning_rate: 1e-4
@@ -58,7 +58,7 @@ dpo:
   epochs: 2
   grad_clip: 1.0
   warmup_steps: 100
-  accumulation_steps: 16
+  accumulation_steps: 8
   optimizer:
     name: lion
     learning_rate: 1.0e-08
