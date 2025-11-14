@@ -81,7 +81,6 @@ class PretrainLoss(torch.nn.Module):
         self.model = model
 
     def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
-        X, Y = batch
         X = batch["x"].to(self.device)
         Y = batch["y"].to(self.device)
         mask = batch["loss_mask"].to(self.device)
