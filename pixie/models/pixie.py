@@ -216,7 +216,6 @@ class Transformer(nn.Module):
         )  # [dim // 2]
 
         if rope_scaling is not None:
-            # YaRN rope scaling: https://arxiv.org/pdf/2309.00071
             assert rope_scaling.type == "yarn", "Only 'yarn' rope scaling is supported."
             # Yarn positional embedding scaling
             orig_max, beta_fast, beta_slow = (
@@ -237,14 +236,10 @@ class Transformer(nn.Module):
                 ),
             )
             inv_freqs = (1 - gamma) * (inv_freqs / s) + gamma * inv_freqs
-            attention_scale = 0.1 * math.log(s) + 1.0
-        else:
-            attention_scale = 1.0
 
         # compute m * θ_i for each position m ∈ [0, end)
         t = torch.arange(end, device=inv_freqs.device)  # [end]
         freqs = torch.outer(t, inv_freqs).float()  # [end, dim // 2]
-        freqs = freqs * attention_scale
         # compute cos and sin, each of shape [end, dim]
         freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim=-1)
         freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)
