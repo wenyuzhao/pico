@@ -14,6 +14,13 @@ class GenerationConfig(BaseModel):
     use_cache: bool
 
 
+class RopeScaling(BaseModel):
+    beta_fast: float = 32
+    beta_slow: float = 1
+    original_max_position_embeddings: int
+    type: Literal["yarn"] = "yarn"
+
+
 class ModelConfig(BaseModel):
     name: str
     tokenizer: str
@@ -26,6 +33,7 @@ class ModelConfig(BaseModel):
     feed_forward_size: int
     max_position_embeddings: int
     rope_theta: float
+    rope_scaling: RopeScaling | None = None
     generation: GenerationConfig | None = None
 
     def load_tokenizer(self) -> PreTrainedTokenizerFast:

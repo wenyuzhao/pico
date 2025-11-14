@@ -1,9 +1,11 @@
+import math
 import torch
 from torch import nn, Tensor
 from torch.nn import RMSNorm
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
+from pixie.models._config import RopeScaling
 from . import BaseGPTModel, register_model, ModelConfig, PretrainedConfig
 
 
@@ -41,18 +43,22 @@ class MultiHeadAttention(nn.Module):
         self.wo = nn.Linear(hidden_size, hidden_size, bias=False)
         self.dropout = dropout
 
-    def apply_rotary_pos_emb(self, q, k, cos, sin, position_ids=None, unsqueeze_dim=1):
-        def rotate_half(x):
+    def apply_rotary_pos_emb(self, q: Tensor, k: Tensor, cos: Tensor, sin: Tensor):
+
+        def rotate_half(x: Tensor):
+            # x: [batch_size, seq_len, num_attention_heads or num_kv_attention_heads, head_dim]
+            # x.shape[-1] is head_dim
+            # return shape: same as x, but x[..., : head_dim // 2] and x[..., head_dim // 2 :] are swapped with a sign change
+            # last dimension order: [-x_{d/2}, -x_{d/2+1}, ..., -x_{d-1}] + [x_0, x_1, ..., x_{d/2-1}]
             return torch.cat(
                 (-x[..., x.shape[-1] // 2 :], x[..., : x.shape[-1] // 2]), dim=-1
             )
 
-        q_embed = (q * cos.unsqueeze(unsqueeze_dim)) + (
-            rotate_half(q) * sin.unsqueeze(unsqueeze_dim)
-        )
-        k_embed = (k * cos.unsqueeze(unsqueeze_dim)) + (
-            rotate_half(k) * sin.unsqueeze(unsqueeze_dim)
-        )
+        # cos, sin: [seq_len, head_dim]
+        cos, sin = cos.unsqueeze(1), sin.unsqueeze(1)  # shape: [seq_len, 1, head_dim]
+        # apply rotary embedding
+        q_embed = (q * cos) + (rotate_half(q) * sin)
+        k_embed = (k * cos) + (rotate_half(k) * sin)
         return q_embed.type_as(q), k_embed.type_as(k)
 
     def forward(self, x: Tensor, position_embedding: PositionEmbedding) -> Tensor:
@@ -66,7 +72,7 @@ class MultiHeadAttention(nn.Module):
         k = k.view(batch_size, seq_len, self.num_kv_attention_heads, self.head_dim)
         v = v.view(batch_size, seq_len, self.num_kv_attention_heads, self.head_dim)
         # Apply positional encoding
-        cos, sin = position_embedding
+        cos, sin = position_embedding  # each of shape [seq_len, head_dim]
         q, k = self.apply_rotary_pos_emb(q, k, cos[:seq_len], sin[:seq_len])
         # transpose to [batch_size, num_attention_heads or num_kv_attention_heads, seq_len, head_dim]
         q, k, v = (a.transpose(1, 2) for a in (q, k, v))
@@ -165,7 +171,8 @@ class Transformer(nn.Module):
         cos, sin = self.precompute_freqs_cis(
             dim=config.hidden_size // config.num_attention_heads,
             end=self.config.max_position_embeddings,
-            theta=config.rope_theta,
+            rope_base=config.rope_theta,
+            rope_scaling=config.rope_scaling,
         )
         self.register_buffer("freqs_cos", cos, persistent=False)
         self.register_buffer("freqs_sin", sin, persistent=False)
@@ -196,10 +203,49 @@ class Transformer(nn.Module):
         self._dynamic_tied_weights_keys = ["out.weight", "tok_emb.weight"]
         self.out.weight = self.tok_emb.weight
 
-    def precompute_freqs_cis(self, dim: int, end: int, theta: float):
-        freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-        t = torch.arange(end, device=freqs.device)
-        freqs = torch.outer(t, freqs).float()
+    def precompute_freqs_cis(
+        self,
+        dim: int,
+        end: int,
+        rope_base: float,
+        rope_scaling: RopeScaling | None = None,
+    ):
+        # compute thetas: θ_i = 1 / (base^(2i/d)), where i ∈ [0, d // 2)
+        inv_freqs = 1.0 / (
+            rope_base ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+        )  # [dim // 2]
+
+        if rope_scaling is not None:
+            # YaRN rope scaling: https://arxiv.org/pdf/2309.00071
+            assert rope_scaling.type == "yarn", "Only 'yarn' rope scaling is supported."
+            # Yarn positional embedding scaling
+            orig_max, beta_fast, beta_slow = (
+                rope_scaling.original_max_position_embeddings,
+                rope_scaling.beta_fast,
+                rope_scaling.beta_slow,
+            )
+            s = end / orig_max
+            wavelengths = 2 * math.pi * inv_freqs  # [dim // 2]
+            r = orig_max / wavelengths  # [dim // 2]
+            gamma = torch.where(
+                r < beta_slow,
+                torch.zeros_like(r),
+                torch.where(
+                    r > beta_fast,
+                    torch.ones_like(r),
+                    (r - beta_slow) / (beta_fast - beta_slow),
+                ),
+            )
+            inv_freqs = (1 - gamma) * (inv_freqs / s) + gamma * inv_freqs
+            attention_scale = 0.1 * math.log(s) + 1.0
+        else:
+            attention_scale = 1.0
+
+        # compute m * θ_i for each position m ∈ [0, end)
+        t = torch.arange(end, device=inv_freqs.device)  # [end]
+        freqs = torch.outer(t, inv_freqs).float()  # [end, dim // 2]
+        freqs = freqs * attention_scale
+        # compute cos and sin, each of shape [end, dim]
         freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim=-1)
         freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)
         return freqs_cos, freqs_sin
