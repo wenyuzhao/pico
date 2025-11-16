@@ -1,13 +1,13 @@
-import duckdb
-import numpy as np
 import torch
 import pandas as pd
-from typing import TypedDict, cast, override
-from .dataset import (
-    DataPreprocessor,
-    CHAT_TEMPLATES,
-    DuckDBDataset,
-)
+from typing import TypedDict, cast
+from . import CHAT_TEMPLATES
+from .pretrain import PretrainLoss
+import torch
+from typing import cast
+from transformers import PreTrainedTokenizerFast
+from typing import Any
+from pixie.models._config import Config
 import torch.nn.functional as F
 
 
@@ -16,107 +16,76 @@ class Message(TypedDict):
     content: str
 
 
-class DPODataPreprocessor(DataPreprocessor):
-    @override
-    def init(self, conn: duckdb.DuckDBPyConnection):
-        conn.execute(
-            f"""
-            CREATE TABLE dataset (
-                chosen INTEGER[], chosen_attention_mask INTEGER[], chosen_assistant_mask INTEGER[],
-                rejected INTEGER[], rejected_attention_mask INTEGER[], rejected_assistant_mask INTEGER[],
-                file VARCHAR, tokens INTEGER
-            )
-            """
-        )
+def _get_conversations(
+    df: pd.DataFrame,
+) -> tuple[list[list[Message]], list[list[Message]]]:
+    assert "chosen" in df.columns, "DataFrame must contain 'chosen' column."
+    assert "rejected" in df.columns, "DataFrame must contain 'rejected' column."
 
-    def _get_conversations(
-        self,
-        df: pd.DataFrame,
-    ) -> tuple[list[list[Message]], list[list[Message]]]:
-        assert "chosen" in df.columns, "DataFrame must contain 'chosen' column."
-        assert "rejected" in df.columns, "DataFrame must contain 'rejected' column."
+    chosen = [x if isinstance(x, list) else x.tolist() for x in df["chosen"].to_list()]
+    rejected = [
+        x if isinstance(x, list) else x.tolist() for x in df["rejected"].to_list()
+    ]
 
-        chosen = [
-            x if isinstance(x, list) else x.tolist() for x in df["chosen"].to_list()
-        ]
-        rejected = [
-            x if isinstance(x, list) else x.tolist() for x in df["rejected"].to_list()
-        ]
-
-        return cast(list[list[Message]], chosen), cast(list[list[Message]], rejected)  # type: ignore
-
-    def _process_batch_impl(
-        self, samples: list[list[Message]]
-    ) -> dict[str, torch.Tensor]:
-        tok = self.cfg._tokenizer
-        r = tok.apply_chat_template(
-            cast(list[list[dict[str, str]]], samples),
-            tokenize=True,
-            # add_generation_prompt=True,
-            return_assistant_tokens_mask=True,
-            return_dict=True,
-            chat_template=CHAT_TEMPLATES.get(tok.name_or_path, ""),
-            max_length=self.cfg.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-            add_special_tokens=self.cfg.add_special_tokens,
-        )
-        return r  # type: ignore
-
-    @override
-    def process_batch(self, df: pd.DataFrame) -> pd.DataFrame:
-        chosen, rejected = self._get_conversations(df)
-        assert len(chosen) == len(rejected)
-        chosen = self._process_batch_impl(chosen)
-        rejected = self._process_batch_impl(rejected)
-        chosen_attention_mask = chosen["attention_mask"].tolist()
-        rejected_attention_mask = rejected["attention_mask"].tolist()
-        df = pd.DataFrame(
-            {
-                "chosen": chosen["input_ids"].tolist(),
-                "chosen_attention_mask": chosen_attention_mask,
-                "chosen_assistant_mask": chosen["assistant_masks"].tolist(),
-                "rejected": rejected["input_ids"].tolist(),
-                "rejected_attention_mask": rejected_attention_mask,
-                "rejected_assistant_mask": rejected["assistant_masks"].tolist(),
-                "tokens": [
-                    np.count_nonzero(x) + np.count_nonzero(y)
-                    for x, y in zip(chosen_attention_mask, rejected_attention_mask)
-                ],
-            }
-        )
-        return df
+    return cast(list[list[Message]], chosen), cast(list[list[Message]], rejected)  # type: ignore
 
 
-class DPODataset(DuckDBDataset):
-    @override
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        result = self.conn.execute(
-            "SELECT chosen, chosen_assistant_mask, rejected, rejected_assistant_mask FROM dataset LIMIT 1 OFFSET ?",
-            (index,),
-        ).fetchone()
-        if not result:
-            raise IndexError(f"Index {index} out of range.")
-        chosen, chosen_mask, rejected, rejected_mask = result
-        assert len(chosen) == self.max_length
-        assert len(chosen_mask) == self.max_length
-        assert len(rejected) == self.max_length
-        assert len(rejected_mask) == self.max_length
-        chosen_x = torch.tensor(chosen[:-1], dtype=torch.long)
-        chosen_y = torch.tensor(chosen[1:], dtype=torch.long)
-        chosen_loss_mask = torch.tensor(chosen_mask[1:], dtype=torch.long)
-        rejected_x = torch.tensor(rejected[:-1], dtype=torch.long)
-        rejected_y = torch.tensor(rejected[1:], dtype=torch.long)
-        rejected_loss_mask = torch.tensor(rejected_mask[1:], dtype=torch.long)
-        return {
-            "chosen_x": chosen_x,
-            "chosen_y": chosen_y,
-            "chosen_mask": chosen_loss_mask,
-            "rejected_x": rejected_x,
-            "rejected_y": rejected_y,
-            "rejected_mask": rejected_loss_mask,
-        }
+def _process_batch_impl(
+    samples: list[list[Message]], config: Config, tok: PreTrainedTokenizerFast
+) -> dict[str, torch.Tensor]:
+    assert config.dpo
+    max_length = config.dpo.context_length
+    r = tok.apply_chat_template(
+        cast(list[list[dict[str, str]]], samples),
+        tokenize=True,
+        # add_generation_prompt=True,
+        return_assistant_tokens_mask=True,
+        return_dict=True,
+        chat_template=CHAT_TEMPLATES.get(tok.name_or_path, ""),
+        max_length=max_length,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+        add_special_tokens=False,
+    )
+    return r  # type: ignore
+
+
+def preprocess(
+    self, data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
+) -> dict[str, Any]:
+    chosen, rejected = self._get_conversations(pd.DataFrame(data))
+    assert len(chosen) == len(rejected)
+    chosen = self._process_batch_impl(chosen, config, tokenizer)
+    rejected = self._process_batch_impl(rejected, config, tokenizer)
+    chosen_x = [
+        torch.tensor(x[:-1], dtype=torch.long) for x in chosen["input_ids"].tolist()
+    ]
+    chosen_y = [
+        torch.tensor(y[1:], dtype=torch.long) for y in chosen["input_ids"].tolist()
+    ]
+    chosen_loss_mask = [
+        torch.tensor(m[1:], dtype=torch.long)
+        for m in chosen["assistant_masks"].tolist()
+    ]
+    rejected_x = [
+        torch.tensor(x[:-1], dtype=torch.long) for x in rejected["input_ids"].tolist()
+    ]
+    rejected_y = [
+        torch.tensor(y[1:], dtype=torch.long) for y in rejected["input_ids"].tolist()
+    ]
+    rejected_loss_mask = [
+        torch.tensor(m[1:], dtype=torch.long)
+        for m in rejected["assistant_masks"].tolist()
+    ]
+    return {
+        "chosen_x": chosen_x,
+        "chosen_y": chosen_y,
+        "chosen_mask": chosen_loss_mask,
+        "rejected_x": rejected_x,
+        "rejected_y": rejected_y,
+        "rejected_mask": rejected_loss_mask,
+    }
 
 
 def logits_to_probs(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:

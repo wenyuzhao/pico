@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import time
 from typing import Any, Literal
@@ -19,12 +20,12 @@ from lion_pytorch import Lion
 from pixie.train import pretrain, sft, dpo
 from torch.utils.data import Dataset
 import wandb
-import torch.nn.functional as F
 import pytorch_warmup as warmup
 import git
 import shutil
 from safetensors.torch import load_model
 from .. import utils
+from datasets import load_dataset, Dataset
 
 
 class TrainingArgs(BaseModel):
@@ -253,32 +254,45 @@ class Trainer:
                 loss = dpo.DPOLoss(
                     self.args.device, model, ref_model, beta=self.args.config.dpo.beta
                 )
+        loss = torch.compile(loss, mode="default")  # type: ignore
         return tokenizer, model, loss
 
     def init_data_loader(self):
-        train_ds: Dataset
         match self.args.type:
             case "pretrain":
-                DatasetImpl = pretrain.PretrainDataset
+                preprocess = pretrain.preprocess
             case "sft":
-                DatasetImpl = sft.SFTDataset
+                preprocess = sft.preprocess
             case "dpo":
-                DatasetImpl = dpo.DPODataset
-        train_ds = DatasetImpl(
-            self.args.dataset.path,
-            self.tokenizer,
-            max_length=self.args.context_length,
-            limit=self.args.dataset.limit,
+                preprocess = dpo.preprocess
+        if isinstance(self.args.dataset, str):
+            path = Path(self.args.dataset)
+            if path.is_file():
+                ds = DatasetConfig(path=str(path.parent), data_files=[str(path.name)])
+            else:
+                ds = DatasetConfig(path=self.args.dataset)
+        else:
+            ds = self.args.dataset
+        dataset = load_dataset(
+            ds.path,
+            split=f"train[:{ds.ratio * 100}%]" if ds.ratio else "train",
+            data_dir=ds.data_dir,
+            data_files=ds.data_files,
         )
-        return DataLoader(
-            train_ds,
+        assert isinstance(dataset, Dataset)
+        dataset = dataset.shuffle(seed=42).map(
+            preprocess,
+            remove_columns=dataset.column_names,
+            batched=True,
+            num_proc=os.cpu_count(),
+            fn_kwargs={"config": self.config, "tokenizer": self.tokenizer},
+            # load_from_cache_file=False,
+        )
+        loader = DataLoader(
+            dataset.with_format("torch"),  # type: ignore
             batch_size=self.args.batch_size,
-            pin_memory=True,
-            drop_last=False,
-            shuffle=False,
-            num_workers=1,
-            sampler=None,
         )
+        return loader
 
     def init_optimizer(self):
         opt = self.args.optimizer

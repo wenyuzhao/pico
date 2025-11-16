@@ -4,7 +4,6 @@ from typing import Annotated, Literal
 import typer
 from .run import run_model
 from pixie.train.train import Trainer
-import pixie.train.dataset as dataset
 import warnings
 import dotenv
 from . import utils
@@ -97,41 +96,6 @@ dataset_app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 app.add_typer(dataset_app, name="dataset", help="Dataset related commands.")
-
-
-@dataset_app.command(name="preprocess")
-def dataset_preprocess(
-    path: Path,
-    type: Annotated[Literal["pretrain", "sft", "dpo"], typer.Option("--type", "-t")],
-    tokenizer: Annotated[str, typer.Option("--tokenizer", "--tok", "-k")],
-    max_length: Annotated[int, typer.Option("--max-length", "--len", "-l")],
-):
-    cfg = dataset.DatasetLoaderConfig(
-        tokenizer=tokenizer,
-        max_length=max_length,
-        add_special_tokens=True,
-        type=type,
-    )
-    dataset.preprocess(path, cfg, type)
-
-
-@dataset_app.command(name="remove")
-def dataset_remove(
-    db: str,
-    files: Annotated[list[str], typer.Option("--files", "-f")],
-):
-    files2 = [Path(f) for f in files]
-    dataset.force_delete_from_db(Path(db), files2)
-
-
-@dataset_app.command(name="shuffle")
-def dataset_shuffle(db: str):
-    dataset.shuffle_dataset(Path(db))
-
-
-@dataset_app.command(name="info")
-def dataset_info(db: str, limit: int | None = None):
-    dataset.show_dataset_stats(Path(db), limit)
 
 
 @app.command(name="run")

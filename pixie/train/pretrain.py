@@ -1,77 +1,40 @@
-import numpy as np
-import pandas as pd
-from typing import override
-from .dataset import DuckDBDataset
+from typing import Any
+from pixie.models._config import Config
 import torch.nn.functional as F
-import duckdb
 import torch
-import pandas as pd
 from typing import cast
-from .dataset import DataPreprocessor
+from transformers import PreTrainedTokenizerFast
 
 
-class PretrainDataPreprocessor(DataPreprocessor):
-    @override
-    def init(self, conn: duckdb.DuckDBPyConnection):
-        conn.execute(
-            f"""
-            CREATE TABLE dataset (
-                input_ids INTEGER[], attention_mask INTEGER[],
-                file VARCHAR, tokens INTEGER
-            )
-            """
-        )
-
-    @override
-    def process_batch(self, df: pd.DataFrame) -> pd.DataFrame:
-        possible_text_columns = ["text", "content"]
-        col_name: str | None = None
-        for col in possible_text_columns:
-            if col in df.columns:
-                col_name = col
-                break
-        assert col_name is not None, "No text column found in the DataFrame."
-        samples = df[col_name]
-        tok = self.cfg._tokenizer
-        data = tok(
-            samples.to_list(),
-            max_length=self.cfg.max_length,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-            add_special_tokens=False,
-            return_overflowing_tokens=True,
-        )
-        data = cast(dict[str, torch.Tensor], data)
-        attention_mask = data["attention_mask"].tolist()
-        df = pd.DataFrame(
-            {
-                "input_ids": data["input_ids"].tolist(),
-                "attention_mask": attention_mask,
-                "tokens": [np.count_nonzero(x) for x in attention_mask],
-            }
-        )
-        return df
-
-
-class PretrainDataset(DuckDBDataset):
-    @override
-    def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        result = self.conn.execute(
-            "SELECT input_ids, attention_mask FROM dataset LIMIT 1 OFFSET ?",
-            (index,),
-        ).fetchone()
-        if not result:
-            raise IndexError(f"Index {index} out of range.")
-        input_ids = result[0]
-        attention_mask = result[1]
-        assert (
-            len(input_ids) == self.max_length
-        ), f"Expected input_ids length {self.max_length}, got {len(input_ids)}"
-        X = torch.tensor(input_ids[:-1], dtype=torch.long)
-        Y = torch.tensor(input_ids[1:], dtype=torch.long)
-        loss_mask = torch.tensor(attention_mask[1:], dtype=torch.long)
-        return {"x": X, "y": Y, "loss_mask": loss_mask}
+def preprocess(
+    data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
+) -> dict[str, list[torch.Tensor]]:
+    assert config.pretrain
+    max_length = config.pretrain.context_length
+    possible_text_columns = ["text", "content"]
+    col_name: str | None = None
+    for col in possible_text_columns:
+        if col in data:
+            col_name = col
+            break
+    assert col_name is not None, "No text column found in the dataset."
+    text = data[col_name]
+    tokens = tokenizer(
+        text,
+        max_length=max_length,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+        add_special_tokens=False,
+        return_overflowing_tokens=True,
+    )
+    tokens = cast(dict[str, torch.Tensor], tokens)
+    xs = [torch.tensor(x[:-1], dtype=torch.long) for x in tokens["input_ids"].tolist()]
+    ys = [torch.tensor(y[1:], dtype=torch.long) for y in tokens["input_ids"].tolist()]
+    masks = [
+        torch.tensor(m[1:], dtype=torch.long) for m in tokens["attention_mask"].tolist()
+    ]
+    return {"x": xs, "y": ys, "loss_mask": masks}
 
 
 class PretrainLoss(torch.nn.Module):
