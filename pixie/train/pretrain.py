@@ -1,9 +1,11 @@
-from typing import Any
+from typing import Any, Optional, Union
 from pixie.models._config import Config
 import torch.nn.functional as F
 import torch
 from typing import cast
 from transformers import PreTrainedTokenizerFast
+from torch import nn
+from transformers import Trainer
 
 
 def preprocess(
@@ -32,25 +34,52 @@ def preprocess(
     return {"input_ids": tokens["input_ids"], "loss_mask": tokens["attention_mask"]}
 
 
-class PretrainLoss(torch.nn.Module):
-    def __init__(self, device: str, model: torch.nn.Module, accumulation_steps: int):
-        super().__init__()
-        self.device = device
-        self.model = model
-        self.accumulation_steps = accumulation_steps
-
-    def forward(
-        self, input_ids: torch.Tensor, loss_mask: torch.Tensor, **kwargs
-    ) -> dict[str, torch.Tensor]:
-        X = input_ids[:, :-1].to(self.device)
-        Y = input_ids[:, 1:].contiguous().to(self.device)
-        mask = loss_mask[:, 1:].to(self.device)
-        out = self.model(X)
+class PretrainTrainer(Trainer):
+    @torch.compile
+    def __compute_loss(
+        self, out: Any, Y: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
         loss = F.cross_entropy(
             out.logits.view(-1, out.logits.size(-1)),
             Y.view(-1),
             reduction="none",
         ).view(Y.size())
         loss = (loss * mask).sum() / mask.sum()
-        loss = loss / self.accumulation_steps
-        return {"loss": loss}
+        loss = loss / self.args.gradient_accumulation_steps
+        return loss
+
+    def compute_loss(
+        self,
+        model: nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        return_outputs: bool = False,
+        num_items_in_batch: Optional[torch.Tensor] = None,
+    ):
+        if self.model_accepts_loss_kwargs:
+            kwargs = {}
+            if num_items_in_batch is not None:
+                kwargs["num_items_in_batch"] = num_items_in_batch
+            inputs = {**inputs, **kwargs}
+
+        input_ids = inputs["input_ids"]
+        loss_mask = inputs["loss_mask"]
+        X = input_ids[:, :-1]
+        Y = input_ids[:, 1:].contiguous()
+        mask = loss_mask[:, 1:]
+
+        outputs = model(X)
+        # Save past state if it exists
+        # TODO: this needs to be fixed and made cleaner later.
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        loss = self.__compute_loss(outputs, Y, mask)
+
+        if (
+            self.args.average_tokens_across_devices
+            and (self.model_accepts_loss_kwargs or self.compute_loss_func)
+            and num_items_in_batch is not None
+        ):
+            loss *= self.accelerator.num_processes
+
+        return (loss, outputs) if return_outputs else loss

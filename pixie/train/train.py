@@ -1,10 +1,6 @@
 from pathlib import Path
 import os, time
-from transformers import (
-    DataCollatorForLanguageModeling,
-    Trainer,
-    TrainingArguments,
-)
+from transformers import TrainingArguments
 from datasets import load_dataset, Dataset
 from pixie import utils
 from pixie.models._config import (
@@ -12,7 +8,7 @@ from pixie.models._config import (
     Config,
     BaseTrainingConfig,
 )
-from pixie.train.pretrain import PretrainLoss
+from pixie.train.pretrain import PretrainTrainer
 from trl.trainer.sft_trainer import SFTTrainer
 from trl.trainer.dpo_trainer import DPOTrainer
 from trl.trainer.dpo_config import DPOConfig
@@ -20,6 +16,7 @@ from trl.trainer.sft_config import SFTConfig
 from pixie.train import pretrain
 from safetensors.torch import load_model
 from typing import Any
+from transformers.modeling_utils import PreTrainedModel
 
 
 def _create_runid_and_path(config: Config, type: str) -> tuple[str, str]:
@@ -96,7 +93,7 @@ def _load_dataset_raw(
 
 
 def _get_trainning_args(
-    args: BaseTrainingConfig, model_save_dir: str
+    args: BaseTrainingConfig, model_save_dir: str, use_wandb: bool
 ) -> TrainingArguments:
     return TrainingArguments(
         output_dir=model_save_dir,
@@ -109,8 +106,8 @@ def _get_trainning_args(
         max_grad_norm=args.grad_clip,
         warmup_steps=args.warmup_steps or 0,
         num_train_epochs=args.epochs,
-        save_strategy="no",
-        # save_steps=500,
+        save_strategy="no",  # "steps",
+        save_steps=5000,
         lr_scheduler_type="cosine",
         learning_rate=5e-4,
         torch_compile=True,
@@ -120,10 +117,12 @@ def _get_trainning_args(
         # Logging args
         logging_strategy="steps",
         logging_steps=100,
+        report_to="wandb" if use_wandb else "none",
+        # run_name=wandb
     )
 
 
-def train_pretrain(config: Config):
+def train_pretrain(config: Config, use_wandb: bool):
     model = utils.load_model(config.model)
     tokenizer = config.model.load_tokenizer()
     # prepare dataset
@@ -131,22 +130,18 @@ def train_pretrain(config: Config):
     args = config.pretrain
     dataset = _load_dataset(args.dataset, pretrain.preprocess, config, tokenizer)
     runid, save_dir = _create_runid_and_path(config, "pretrain")
-    training_args = _get_trainning_args(args, save_dir)
-    data_collator = DataCollatorForLanguageModeling(tokenizer, mlm=False)
-    loss_fn = PretrainLoss(
-        device="cuda", model=model, accumulation_steps=args.accumulation_steps
-    )
-    trainer = Trainer(
-        model=loss_fn,
+    training_args = _get_trainning_args(args, save_dir, use_wandb)
+    training_args.label_names = ["loss_mask"]
+    trainer = PretrainTrainer(
+        model=model,
         args=training_args,
-        data_collator=data_collator,
         train_dataset=dataset,
     )
     trainer.train()
     trainer.save_model(save_dir)
 
 
-def train_sft(config: Config, ckpt: Path):
+def train_sft(config: Config, ckpt: Path, use_wandb: bool):
     model = utils.load_model(config.model)
     missing, unexpected = load_model(model, ckpt, device="cuda")
     if missing or unexpected:
@@ -159,7 +154,7 @@ def train_sft(config: Config, ckpt: Path):
     args = config.sft
     dataset = _load_dataset_raw(args.dataset)
     runid, save_dir = _create_runid_and_path(config, "sft")
-    raw_training_args = _get_trainning_args(args, save_dir)
+    raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args = SFTConfig(**raw_training_args.to_dict())
     trainer = SFTTrainer(
         model=model,
@@ -170,7 +165,7 @@ def train_sft(config: Config, ckpt: Path):
     trainer.save_model(save_dir)
 
 
-def train_dpo(config: Config, ckpt: Path):
+def train_dpo(config: Config, ckpt: Path, use_wandb: bool):
     model = utils.load_model(config.model)
     missing, unexpected = load_model(model, ckpt, device="cuda")
     if missing or unexpected:
@@ -189,7 +184,7 @@ def train_dpo(config: Config, ckpt: Path):
     args = config.sft
     dataset = _load_dataset_raw(args.dataset)
     runid, save_dir = _create_runid_and_path(config, "dpo")
-    raw_training_args = _get_trainning_args(args, save_dir)
+    raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args = DPOConfig(**raw_training_args.to_dict())
     trainer = DPOTrainer(
         model=model,

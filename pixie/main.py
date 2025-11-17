@@ -48,7 +48,7 @@ def pretrain(
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = utils.load_config(f"configs/{config_name}.yaml")
-    train_pretrain(config)
+    train_pretrain(config, use_wandb=wandb)
 
 
 @app.command()
@@ -62,7 +62,7 @@ def sft(
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
     assert config.sft is not None, "SFT configuration is missing."
-    train_sft(config, ckpt)
+    train_sft(config, ckpt, use_wandb=wandb)
 
 
 @app.command()
@@ -76,7 +76,7 @@ def dpo(
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
     assert config.dpo is not None, "DPO configuration is missing."
-    train_dpo(config, ckpt)
+    train_dpo(config, ckpt, use_wandb=wandb)
 
 
 dataset_app = typer.Typer(
