@@ -60,6 +60,9 @@ def run_model(
             messages = [{"role": "user", "content": prompt}]
         else:
             assert isinstance(prompt, str)
+            if tok.bos_token is not None:
+                assert isinstance(tok.bos_token, str), "BOS token should be a string."
+                prompt = tok.bos_token + prompt
             messages = prompt
         for t in complete_streamed(tok, pl, messages):
             print(t, end="", flush=True)
