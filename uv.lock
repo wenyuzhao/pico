@@ -910,9 +910,13 @@ dependencies = [
     { name = "toml" },
     { name = "torch" },
     { name = "transformers" },
-    { name = "trl" },
     { name = "typer" },
     { name = "wandb" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "trl" },
 ]
 
 [package.metadata]
@@ -929,10 +933,12 @@ requires-dist = [
     { name = "toml", specifier = ">=0.10.2" },
     { name = "torch", specifier = ">=2.7.1" },
     { name = "transformers", specifier = ">=4.54.0" },
-    { name = "trl", specifier = ">=0.25.1" },
     { name = "typer", specifier = ">=0.19.2" },
     { name = "wandb", specifier = ">=0.21.0" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "trl", specifier = ">=0.25.1" }]
 
 [[package]]
 name = "platformdirs"

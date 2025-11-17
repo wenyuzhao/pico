@@ -45,7 +45,7 @@ sft:
 dpo:
   dataset: datasets/minimind/dpo.jsonl
   context_length: 1024
-  batch_size: 14
+  batch_size: 12
   epochs: 2
   grad_clip: 1.0
   warmup_steps: 100

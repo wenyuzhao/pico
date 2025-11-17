@@ -3,18 +3,13 @@ import os, time
 from transformers import TrainingArguments
 from datasets import load_dataset, Dataset
 from pixie import utils
-from pixie.models._config import (
+from pixie.models._base import (
     AdamWOptimizerConfig,
     DatasetConfig,
     Config,
     BaseTrainingConfig,
 )
-from pixie.train.pretrain import PretrainTrainer
-from trl.trainer.sft_trainer import SFTTrainer
-from trl.trainer.dpo_trainer import DPOTrainer
-from trl.trainer.dpo_config import DPOConfig
-from trl.trainer.sft_config import SFTConfig
-from pixie.train import pretrain
+from pixie.train import pretrain, sft, dpo
 from typing import Any
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
@@ -70,28 +65,6 @@ def _load_dataset(
     return dataset
 
 
-def _load_dataset_raw(
-    dataset_config: DatasetConfig | str,
-) -> Dataset:
-    if isinstance(dataset_config, str):
-        path = Path(dataset_config)
-        if path.is_file():
-            ds = DatasetConfig(path=str(path.parent), data_files=[str(path.name)])
-        else:
-            ds = DatasetConfig(path=dataset_config)
-    else:
-        ds = dataset_config
-    dataset = load_dataset(
-        ds.path,
-        split=f"train[:{ds.ratio * 100}%]" if ds.ratio else "train",
-        data_dir=ds.data_dir,
-        data_files=ds.data_files,
-    )
-    assert isinstance(dataset, Dataset)
-    dataset = dataset.shuffle(seed=42)
-    return dataset
-
-
 def _get_trainning_args(
     args: BaseTrainingConfig, model_save_dir: str, use_wandb: bool
 ) -> TrainingArguments:
@@ -116,6 +89,7 @@ def _get_trainning_args(
         learning_rate=args.optimizer.learning_rate,
         torch_compile=True,
         torch_compile_mode="default",
+        half_precision_backend="cpu_amp",
         # Evaluation args
         do_eval=False,
         # Logging args
@@ -131,15 +105,17 @@ def train_pretrain(config: Config, use_wandb: bool):
     tokenizer = config.model.load_tokenizer()
     runid, save_dir = _create_runid_and_path(config, "pretrain")
     # save tokenizer and config
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     utils.save_config(config, Path(save_dir) / "config.yaml")
     tokenizer.save_pretrained(save_dir, save_jinja_files=False)
     # prepare dataset
     assert config.pretrain is not None
     args = config.pretrain
     dataset = _load_dataset(args.dataset, pretrain.preprocess, config, tokenizer)
+    # dataset = dataset.take(100)
     training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args.label_names = ["loss_mask"]
-    trainer = PretrainTrainer(
+    trainer = pretrain.PretrainTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
@@ -160,23 +136,14 @@ def train_sft(config: Config, ckpt: Path, use_wandb: bool):
     # prepare dataset
     assert config.sft is not None
     args = config.sft
-    dataset = _load_dataset_raw(args.dataset)
-    if "conversations" in dataset.column_names:
-        dataset = dataset.map(
-            lambda data: {"messages": data["conversations"]},
-            remove_columns=dataset.column_names,
-            batched=True,
-            num_proc=os.cpu_count(),
-        )
-    # dataset = dataset.take(1000)
-    raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
-    training_args = SFTConfig(**raw_training_args.to_dict())
-    training_args.max_length = args.context_length
-    trainer = SFTTrainer(
+    dataset = _load_dataset(args.dataset, sft.preprocess, config, tokenizer)
+    # dataset = dataset.take(100)
+    training_args = _get_trainning_args(args, save_dir, use_wandb)
+    training_args.label_names = ["loss_mask"]
+    trainer = sft.SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
-        processing_class=tokenizer,
     )
     trainer.train()
     trainer.save_model(save_dir)
@@ -193,18 +160,22 @@ def train_dpo(config: Config, ckpt: Path, use_wandb: bool):
     utils.save_config(config, Path(save_dir) / "config.yaml")
     tokenizer.save_pretrained(save_dir, save_jinja_files=False)
     # prepare dataset
-    assert config.sft is not None
-    args = config.sft
-    dataset = _load_dataset_raw(args.dataset)
-    raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
-    training_args = DPOConfig(**raw_training_args.to_dict())
-    training_args.max_length = args.context_length
-    trainer = DPOTrainer(
+    assert config.dpo is not None
+    args = config.dpo
+    dataset = _load_dataset(args.dataset, dpo.preprocess, config, tokenizer)
+    # dataset = dataset.take(100)
+    training_args = _get_trainning_args(args, save_dir, use_wandb)
+    training_args.label_names = [
+        "rejected_loss_mask",
+        "chosen_loss_mask",
+        "chosen_input_ids",
+        "rejected_input_ids",
+    ]
+    trainer = dpo.DPOTrainer(
         model=model,
         ref_model=ref_model,
         args=training_args,
         train_dataset=dataset,
-        processing_class=tokenizer,
     )
     trainer.train()
     trainer.save_model(save_dir)

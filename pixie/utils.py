@@ -1,4 +1,4 @@
-from .models._model import Config, ModelConfig, BaseGPTModel, MODELS
+from pixie.models._base import Config, ModelConfig, BaseCasualLM, MODELS
 from pathlib import Path
 import yaml
 from typing import Any
@@ -63,7 +63,7 @@ def load_config(path: str | Path) -> Config:
     return config
 
 
-def load_model(config: ModelConfig) -> BaseGPTModel:
+def load_model(config: ModelConfig) -> BaseCasualLM:
     assert config.name in MODELS, f"Unknown model name: {config.name}"
     Model, Config = MODELS[config.name]
     assert isinstance(config, Config)

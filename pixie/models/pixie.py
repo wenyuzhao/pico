@@ -5,8 +5,14 @@ from torch.nn import RMSNorm
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
-from pixie.models._config import RopeScaling
-from ._model import BaseGPTModel, register_model, ModelConfig, PretrainedConfig
+from ._base import (
+    RopeScaling,
+    BaseCasualLM,
+    register_model,
+    ModelConfig,
+    PretrainedConfig,
+    BasePretrainedConfig,
+)
 
 
 class PixieConfig(ModelConfig): ...
@@ -269,8 +275,14 @@ class Transformer(nn.Module):
         return logits
 
 
+class PixiePretrainedConfig(BasePretrainedConfig):
+    model_name: str = "Pixie"
+
+
 @register_model("pixie", PixieConfig)
-class Pixie(BaseGPTModel[PixieConfig]):
+class Pixie(BaseCasualLM[PixieConfig]):
+    config_class = PixiePretrainedConfig
+
     def __init__(self, config: PixieConfig | PretrainedConfig):
         config = PixieConfig.cast(config)
         super().__init__(config)

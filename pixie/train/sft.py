@@ -1,13 +1,10 @@
-import torch
-import pandas as pd
-from typing import TypedDict, cast
-from . import CHAT_TEMPLATES
-from .pretrain import PretrainLoss
-import torch
-from typing import cast
-from transformers import PreTrainedTokenizerFast
 from typing import Any
-from pixie.models._config import Config
+from pixie.models._base import Config
+import torch
+from typing import cast, TypedDict
+from transformers import PreTrainedTokenizerFast
+from pixie.train import CHAT_TEMPLATES
+from .pretrain import PretrainTrainer
 
 
 class Message(TypedDict):
@@ -15,19 +12,17 @@ class Message(TypedDict):
     content: str
 
 
-def _get_conversations(df: pd.DataFrame) -> list[list[Message]]:
-    conversations: list[list[Message]]
+def _get_conversations(data: dict[str, Any]) -> list[list[dict[str, str]]]:
+    conversations: list[list[dict[str, str]]]
 
-    if "conversations" in df.columns:
-        conversations = df["conversations"].to_list()  # type: ignore
-    elif "messages" in df.columns:
-        conversations = df["messages"].to_list()  # type: ignore
-    elif (
-        "instruction" in df.columns and "input" in df.columns and "output" in df.columns
-    ):
+    if "conversations" in data:
+        conversations = data["conversations"]  # type: ignore
+    elif "messages" in data:
+        conversations = data["messages"]  # type: ignore
+    elif "instruction" in data and "input" in data and "output" in data:
         conversations = []
         for instruction, input, output in zip(
-            df["instruction"], df["input"], df["output"]
+            data["instruction"], data["input"], data["output"]
         ):
             if input and len(input) > 0:
                 conversations.append(
@@ -71,17 +66,17 @@ def _get_conversations(df: pd.DataFrame) -> list[list[Message]]:
 
 def preprocess(
     data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
-) -> dict[str, Any]:
+) -> dict[str, torch.Tensor]:
     assert config.sft
     max_length = config.sft.context_length
-    samples = _get_conversations(pd.DataFrame(data))
+    samples = _get_conversations(data)
     tokens = tokenizer.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),
         tokenize=True,
         # add_generation_prompt=True,
         return_assistant_tokens_mask=True,
         return_dict=True,
-        chat_template=CHAT_TEMPLATES.get(tokenizer.name_or_path, ""),
+        chat_template=CHAT_TEMPLATES.get(config.model.tokenizer, None),
         max_length=max_length,
         padding="max_length",
         truncation=True,
@@ -89,13 +84,7 @@ def preprocess(
         add_special_tokens=False,
     )
     tokens = cast(dict[str, torch.Tensor], tokens)
-    xs = [torch.tensor(x[:-1], dtype=torch.long) for x in tokens["input_ids"].tolist()]
-    ys = [torch.tensor(y[1:], dtype=torch.long) for y in tokens["input_ids"].tolist()]
-    masks = [
-        torch.tensor(m[1:], dtype=torch.long)
-        for m in tokens["assistant_masks"].tolist()
-    ]
-    return {"x": xs, "y": ys, "loss_mask": masks}
+    return {"input_ids": tokens["input_ids"], "loss_mask": tokens["assistant_masks"]}
 
 
-class SFTLoss(PretrainLoss): ...
+class SFTTrainer(PretrainTrainer): ...

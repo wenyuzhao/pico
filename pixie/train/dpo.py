@@ -1,14 +1,12 @@
-import torch
-import pandas as pd
-from typing import TypedDict, cast
-from . import CHAT_TEMPLATES
-from .pretrain import PretrainLoss
-import torch
-from typing import cast
-from transformers import PreTrainedTokenizerFast
-from typing import Any
-from pixie.models._config import Config
+from typing import Any, Optional, Union
+from pixie.models._base import Config
 import torch.nn.functional as F
+import torch
+from typing import cast, TypedDict
+from transformers import PreTrainedTokenizerFast
+from torch import nn
+from transformers import Trainer
+from pixie.train import CHAT_TEMPLATES
 
 
 class Message(TypedDict):
@@ -17,17 +15,15 @@ class Message(TypedDict):
 
 
 def _get_conversations(
-    df: pd.DataFrame,
+    data: dict[str, Any],
 ) -> tuple[list[list[Message]], list[list[Message]]]:
-    assert "chosen" in df.columns, "DataFrame must contain 'chosen' column."
-    assert "rejected" in df.columns, "DataFrame must contain 'rejected' column."
+    assert "chosen" in data
+    assert "rejected" in data
 
-    chosen = [x if isinstance(x, list) else x.tolist() for x in df["chosen"].to_list()]
-    rejected = [
-        x if isinstance(x, list) else x.tolist() for x in df["rejected"].to_list()
-    ]
+    chosen = [x if isinstance(x, list) else x.tolist() for x in data["chosen"]]
+    rejected = [x if isinstance(x, list) else x.tolist() for x in data["rejected"]]
 
-    return cast(list[list[Message]], chosen), cast(list[list[Message]], rejected)  # type: ignore
+    return chosen, rejected
 
 
 def _process_batch_impl(
@@ -52,42 +48,25 @@ def _process_batch_impl(
 
 
 def preprocess(
-    self, data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
-) -> dict[str, Any]:
-    chosen, rejected = self._get_conversations(pd.DataFrame(data))
+    data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
+) -> dict[str, torch.Tensor]:
+    chosen, rejected = _get_conversations(data)
     assert len(chosen) == len(rejected)
-    chosen = self._process_batch_impl(chosen, config, tokenizer)
-    rejected = self._process_batch_impl(rejected, config, tokenizer)
-    chosen_x = [
-        torch.tensor(x[:-1], dtype=torch.long) for x in chosen["input_ids"].tolist()
-    ]
-    chosen_y = [
-        torch.tensor(y[1:], dtype=torch.long) for y in chosen["input_ids"].tolist()
-    ]
-    chosen_loss_mask = [
-        torch.tensor(m[1:], dtype=torch.long)
-        for m in chosen["assistant_masks"].tolist()
-    ]
-    rejected_x = [
-        torch.tensor(x[:-1], dtype=torch.long) for x in rejected["input_ids"].tolist()
-    ]
-    rejected_y = [
-        torch.tensor(y[1:], dtype=torch.long) for y in rejected["input_ids"].tolist()
-    ]
-    rejected_loss_mask = [
-        torch.tensor(m[1:], dtype=torch.long)
-        for m in rejected["assistant_masks"].tolist()
-    ]
+    chosen = _process_batch_impl(chosen, config, tokenizer)
+    rejected = _process_batch_impl(rejected, config, tokenizer)
+    chosen_input_ids = chosen["input_ids"]
+    chosen_loss_mask = chosen["assistant_masks"]
+    rejected_input_ids = rejected["input_ids"]
+    rejected_loss_mask = rejected["assistant_masks"]
     return {
-        "chosen_x": chosen_x,
-        "chosen_y": chosen_y,
-        "chosen_mask": chosen_loss_mask,
-        "rejected_x": rejected_x,
-        "rejected_y": rejected_y,
-        "rejected_mask": rejected_loss_mask,
+        "chosen_input_ids": chosen_input_ids,
+        "chosen_loss_mask": chosen_loss_mask,
+        "rejected_input_ids": rejected_input_ids,
+        "rejected_loss_mask": rejected_loss_mask,
     }
 
 
+# @torch.compile
 def logits_to_probs(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     # logits: [batch_size, seq_len, vocab_size]
     # labels: [batch_size, seq_len]
@@ -96,6 +75,7 @@ def logits_to_probs(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     return probs  # [batch_size, seq_len]
 
 
+# @torch.compile
 def dpo_loss(
     ref_probs: torch.Tensor, probs: torch.Tensor, mask: torch.Tensor, beta: float
 ) -> torch.Tensor:
@@ -118,38 +98,61 @@ def dpo_loss(
     return loss.mean()
 
 
-class DPOLoss(torch.nn.Module):
-    def __init__(
-        self,
-        device: str,
-        model: torch.nn.Module,
-        ref_model: torch.nn.Module,
-        beta: float,
-    ):
-        super().__init__()
-        self.device = device
-        self.beta = beta
-        self.model = model
-        self.ref_model = ref_model
+class DPOTrainer(Trainer):
+    def __init__(self, *args: Any, ref_model: nn.Module, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.ref_model = torch.compile(ref_model, mode="default").to(self.args.device)  # type: ignore
 
-    def forward(
+    def compute_loss(
         self,
-        batch: dict[str, torch.Tensor],
-    ) -> torch.Tensor:
-        chosen_x = batch["chosen_x"].to(self.device)
-        chosen_y = batch["chosen_y"].to(self.device)
-        chosen_mask = batch["chosen_mask"].to(self.device)
-        rejected_x = batch["rejected_x"].to(self.device)
-        rejected_y = batch["rejected_y"].to(self.device)
-        rejected_mask = batch["rejected_mask"].to(self.device)
+        model: nn.Module,
+        inputs: dict[str, Union[torch.Tensor, Any]],
+        return_outputs: bool = False,
+        num_items_in_batch: Optional[torch.Tensor] = None,
+    ):
+        if self.model_accepts_loss_kwargs:
+            kwargs = {}
+            if num_items_in_batch is not None:
+                kwargs["num_items_in_batch"] = num_items_in_batch
+            inputs = {**inputs, **kwargs}
+
+        chosen_input_ids, chosen_loss_mask = (
+            inputs["chosen_input_ids"],
+            inputs["chosen_loss_mask"],
+        )
+        rejected_input_ids, rejected_loss_mask = (
+            inputs["rejected_input_ids"],
+            inputs["rejected_loss_mask"],
+        )
+        chosen_x = chosen_input_ids[:, :-1]
+        chosen_y = chosen_input_ids[:, 1:]
+        chosen_mask = chosen_loss_mask[:, 1:]
+        rejected_x = rejected_input_ids[:, :-1]
+        rejected_y = rejected_input_ids[:, 1:]
+        rejected_mask = rejected_loss_mask[:, 1:]
         X = torch.cat([chosen_x, rejected_x], dim=0)
         Y = torch.cat([chosen_y, rejected_y], dim=0)
         loss_mask = torch.cat([chosen_mask, rejected_mask], dim=0)
+
         with torch.no_grad():
             assert self.ref_model is not None
             ref_out = self.ref_model(X)
         ref_probs = logits_to_probs(ref_out.logits, Y) * loss_mask
-        out = self.model(X)
-        probs = logits_to_probs(out.logits, Y) * loss_mask
+        outputs = model(X)
+
+        # Save past state if it exists
+        # TODO: this needs to be fixed and made cleaner later.
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        probs = logits_to_probs(outputs.logits, Y) * loss_mask
         loss = dpo_loss(ref_probs, probs, loss_mask, beta=0.1)
-        return loss
+
+        if (
+            self.args.average_tokens_across_devices
+            and (self.model_accepts_loss_kwargs or self.compute_loss_func)
+            and num_items_in_batch is not None
+        ):
+            loss *= self.accelerator.num_processes
+
+        return (loss, outputs) if return_outputs else loss

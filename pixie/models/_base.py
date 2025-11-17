@@ -1,8 +1,14 @@
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, override
 from pydantic import BaseModel, Field
+from pathlib import Path
 from transformers.tokenization_utils_fast import PreTrainedTokenizerFast
 from transformers.models.auto.tokenization_auto import AutoTokenizer
 from transformers.configuration_utils import PretrainedConfig
+from transformers.generation.utils import GenerationMixin
+from transformers.modeling_utils import PreTrainedModel
+from transformers.modeling_outputs import CausalLMOutputWithPast
+from torch import nn
+import shutil
 
 
 class GenerationConfig(BaseModel):
@@ -117,3 +123,75 @@ class Config(BaseModel):
     pretrain: PretrainConfig | None = None
     sft: SFTConfig | None = None
     dpo: DPOConfig | None = None
+
+
+class BaseCasualLM[C: ModelConfig](PreTrainedModel, GenerationMixin):
+    config_class = PretrainedConfig
+    model_type: str
+
+    def __init__(self, config: C):
+        self.args: C = config
+        tok = config.load_tokenizer()
+        config_dict = config.model_dump()
+        if "generation" in config_dict:
+            del config_dict["generation"]
+        super().__init__(self.config_class(**config_dict))
+        assert self.generation_config
+        gcfg = self.args.generation
+        if gcfg is not None:
+            self.generation_config.max_new_tokens = gcfg.max_new_tokens
+            self.generation_config.do_sample = gcfg.do_sample
+            self.generation_config.temperature = gcfg.temperature
+            self.generation_config.top_p = gcfg.top_p
+            self.generation_config.repetition_penalty = gcfg.repetition_penalty
+            self.generation_config.pad_token_id = tok.pad_token_id
+            self.generation_config.eos_token_id = tok.eos_token_id
+            self.generation_config.use_cache = gcfg.use_cache
+        self.out = CausalLMOutputWithPast()
+        self.model: nn.Module
+
+    @override
+    def save_pretrained(self, *args, **kwargs):
+        models_dir = Path(__file__).parent
+        save_directory = args[0] if args else kwargs.get("save_directory", None)
+        assert save_directory
+        save_dir = Path(save_directory)
+        # Copy model definition
+        shutil.copyfile(models_dir / "_base.py", save_dir / "_base.py")
+        if (models_dir / f"{self.model_type}.py").exists():
+            src = models_dir / f"{self.model_type}.py"
+        elif (models_dir / f"model.py").exists():
+            src = models_dir / f"model.py"
+        else:
+            raise FileNotFoundError(f"Source file for {self.model_type} not found.")
+        shutil.copyfile(src, save_dir / f"model.py")
+        # Save model weights and config
+        super().save_pretrained(*args, **kwargs)
+
+
+MODELS: dict[str, tuple[type[BaseCasualLM], type[ModelConfig]]] = {}
+
+
+class BasePretrainedConfig(PretrainedConfig):
+    model_name: str
+    has_no_defaults_at_init = True
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.auto_map = {
+            "AutoConfig": f"model.{self.__class__.__name__}",
+            "AutoModel": f"model.{self.model_name}",
+            "AutoModelForCausalLM": f"model.{self.model_name}",
+        }
+
+
+def register_model[T: ModelConfig](name: str, config: type[T]):
+    def _register(cls: type[BaseCasualLM]):
+        if name in MODELS:
+            raise ValueError(f"Model {name} is already registered.")
+        MODELS[name] = (cls, config)
+        cls.model_type = name
+        cls.config_class.model_type = name
+        return cls
+
+    return _register
