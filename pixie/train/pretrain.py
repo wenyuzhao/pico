@@ -8,7 +8,7 @@ from transformers import PreTrainedTokenizerFast
 
 def preprocess(
     data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
-) -> dict[str, list[torch.Tensor]]:
+) -> dict[str, torch.Tensor]:
     assert config.pretrain
     max_length = config.pretrain.context_length
     possible_text_columns = ["text", "content"]
@@ -29,24 +29,22 @@ def preprocess(
         return_overflowing_tokens=True,
     )
     tokens = cast(dict[str, torch.Tensor], tokens)
-    xs = [torch.tensor(x[:-1], dtype=torch.long) for x in tokens["input_ids"].tolist()]
-    ys = [torch.tensor(y[1:], dtype=torch.long) for y in tokens["input_ids"].tolist()]
-    masks = [
-        torch.tensor(m[1:], dtype=torch.long) for m in tokens["attention_mask"].tolist()
-    ]
-    return {"x": xs, "y": ys, "loss_mask": masks}
+    return {"input_ids": tokens["input_ids"], "loss_mask": tokens["attention_mask"]}
 
 
 class PretrainLoss(torch.nn.Module):
-    def __init__(self, device: str, model: torch.nn.Module):
+    def __init__(self, device: str, model: torch.nn.Module, accumulation_steps: int):
         super().__init__()
         self.device = device
         self.model = model
+        self.accumulation_steps = accumulation_steps
 
-    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
-        X = batch["x"].to(self.device)
-        Y = batch["y"].to(self.device)
-        mask = batch["loss_mask"].to(self.device)
+    def forward(
+        self, input_ids: torch.Tensor, loss_mask: torch.Tensor, **kwargs
+    ) -> dict[str, torch.Tensor]:
+        X = input_ids[:, :-1].to(self.device)
+        Y = input_ids[:, 1:].contiguous().to(self.device)
+        mask = loss_mask[:, 1:].to(self.device)
         out = self.model(X)
         loss = F.cross_entropy(
             out.logits.view(-1, out.logits.size(-1)),
@@ -54,4 +52,5 @@ class PretrainLoss(torch.nn.Module):
             reduction="none",
         ).view(Y.size())
         loss = (loss * mask).sum() / mask.sum()
-        return loss
+        loss = loss / self.accumulation_steps
+        return {"loss": loss}

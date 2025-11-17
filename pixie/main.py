@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 import typer
 from .run import run_model
-from pixie.train.train import Trainer
+from pixie.train.train import train_dpo, train_pretrain, train_sft
 import warnings
 import dotenv
 from . import utils
@@ -48,10 +48,7 @@ def pretrain(
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = utils.load_config(f"configs/{config_name}.yaml")
-    trainer = Trainer(
-        config, project=proj, checkpoint=None, use_wandb=wandb, train_type="pretrain"
-    )
-    trainer.train()
+    train_pretrain(config)
 
 
 @app.command()
@@ -65,10 +62,7 @@ def sft(
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
     assert config.sft is not None, "SFT configuration is missing."
-    trainer = Trainer(
-        config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="sft"
-    )
-    trainer.train()
+    train_sft(config, ckpt)
 
 
 @app.command()
@@ -82,10 +76,7 @@ def dpo(
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
     assert config.dpo is not None, "DPO configuration is missing."
-    trainer = Trainer(
-        config, project=proj, checkpoint=ckpt, use_wandb=wandb, train_type="dpo"
-    )
-    trainer.train()
+    train_dpo(config, ckpt)
 
 
 dataset_app = typer.Typer(
