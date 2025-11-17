@@ -127,11 +127,14 @@ def _get_trainning_args(
 def train_pretrain(config: Config, use_wandb: bool):
     model = utils.load_model(config.model)
     tokenizer = config.model.load_tokenizer()
+    runid, save_dir = _create_runid_and_path(config, "pretrain")
+    # save tokenizer and config
+    utils.save_config(config, Path(save_dir) / "config.yaml")
+    tokenizer.save_pretrained(save_dir, save_jinja_files=False)
     # prepare dataset
     assert config.pretrain is not None
     args = config.pretrain
     dataset = _load_dataset(args.dataset, pretrain.preprocess, config, tokenizer)
-    runid, save_dir = _create_runid_and_path(config, "pretrain")
     training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args.label_names = ["loss_mask"]
     trainer = PretrainTrainer(
@@ -151,11 +154,15 @@ def train_sft(config: Config, ckpt: Path, use_wandb: bool):
             f"Failed to load model: missing keys: {missing}, unexpected keys: {unexpected}"
         )
     print(f"Loaded checkpoint from {ckpt}")
+    runid, save_dir = _create_runid_and_path(config, "sft")
+    # save tokenizer and config
+    tokenizer = config.model.load_tokenizer()
+    utils.save_config(config, Path(save_dir) / "config.yaml")
+    tokenizer.save_pretrained(save_dir, save_jinja_files=False)
     # prepare dataset
     assert config.sft is not None
     args = config.sft
     dataset = _load_dataset_raw(args.dataset)
-    runid, save_dir = _create_runid_and_path(config, "sft")
     raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args = SFTConfig(**raw_training_args.to_dict())
     trainer = SFTTrainer(
@@ -181,11 +188,15 @@ def train_dpo(config: Config, ckpt: Path, use_wandb: bool):
         raise ValueError(
             f"Failed to load reference model: missing keys: {missing}, unexpected keys: {unexpected}"
         )
+    runid, save_dir = _create_runid_and_path(config, "dpo")
+    # save tokenizer and config
+    tokenizer = config.model.load_tokenizer()
+    utils.save_config(config, Path(save_dir) / "config.yaml")
+    tokenizer.save_pretrained(save_dir, save_jinja_files=False)
     # prepare dataset
     assert config.sft is not None
     args = config.sft
     dataset = _load_dataset_raw(args.dataset)
-    runid, save_dir = _create_runid_and_path(config, "dpo")
     raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args = DPOConfig(**raw_training_args.to_dict())
     trainer = DPOTrainer(
