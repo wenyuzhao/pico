@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from transformers.activations import ACT2FN
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from pixie.models._config import RopeScaling
-from . import BaseGPTModel, register_model, ModelConfig, PretrainedConfig
+from ._model import BaseGPTModel, register_model, ModelConfig, PretrainedConfig
 
 
 class PixieConfig(ModelConfig): ...
@@ -276,7 +276,16 @@ class Pixie(BaseGPTModel[PixieConfig]):
         super().__init__(config)
         self.model = Transformer(config)
 
-    def forward(self, input_ids: Tensor, **args) -> CausalLMOutputWithPast:
+    def forward(self, input_ids: Tensor, **kwargs) -> CausalLMOutputWithPast:
+        # print(kwargs)
         logits = self.model(input_ids)
-        self.out.__setitem__("logits", logits)
+        self.out["logits"] = logits
+        if "labels" in kwargs:
+            self.out["loss"] = self.loss_function(
+                logits=logits,
+                # labels=kwargs["labels"],
+                vocab_size=self.args.get_vocab_size(),
+                **kwargs,
+            )
+            self.out["loss"] = self.out["loss"]
         return self.out

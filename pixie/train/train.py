@@ -15,9 +15,8 @@ from trl.trainer.dpo_trainer import DPOTrainer
 from trl.trainer.dpo_config import DPOConfig
 from trl.trainer.sft_config import SFTConfig
 from pixie.train import pretrain
-from safetensors.torch import load_model
 from typing import Any
-from transformers.modeling_utils import PreTrainedModel
+from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 
 
 def _create_runid_and_path(config: Config, type: str) -> tuple[str, str]:
@@ -103,7 +102,10 @@ def _get_trainning_args(
         # Training args
         do_train=True,
         fp16=True,
-        per_device_train_batch_size=args.batch_size,
+        per_device_train_batch_size=(
+            args.batch_size if args.batch_size != "auto" else 8
+        ),
+        auto_find_batch_size=args.batch_size == "auto",
         gradient_accumulation_steps=args.accumulation_steps,
         max_grad_norm=args.grad_clip,
         warmup_steps=args.warmup_steps or 0,
@@ -147,50 +149,47 @@ def train_pretrain(config: Config, use_wandb: bool):
 
 
 def train_sft(config: Config, ckpt: Path, use_wandb: bool):
-    model = utils.load_model(config.model)
-    missing, unexpected = load_model(model, ckpt, device="cuda")
-    if missing or unexpected:
-        raise ValueError(
-            f"Failed to load model: missing keys: {missing}, unexpected keys: {unexpected}"
-        )
+    model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
     runid, save_dir = _create_runid_and_path(config, "sft")
     # save tokenizer and config
     tokenizer = config.model.load_tokenizer()
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     utils.save_config(config, Path(save_dir) / "config.yaml")
     tokenizer.save_pretrained(save_dir, save_jinja_files=False)
     # prepare dataset
     assert config.sft is not None
     args = config.sft
     dataset = _load_dataset_raw(args.dataset)
+    if "conversations" in dataset.column_names:
+        dataset = dataset.map(
+            lambda data: {"messages": data["conversations"]},
+            remove_columns=dataset.column_names,
+            batched=True,
+            num_proc=os.cpu_count(),
+        )
+    # dataset = dataset.take(1000)
     raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args = SFTConfig(**raw_training_args.to_dict())
+    training_args.max_length = args.context_length
     trainer = SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
+        processing_class=tokenizer,
     )
     trainer.train()
     trainer.save_model(save_dir)
 
 
 def train_dpo(config: Config, ckpt: Path, use_wandb: bool):
-    model = utils.load_model(config.model)
-    missing, unexpected = load_model(model, ckpt, device="cuda")
-    if missing or unexpected:
-        raise ValueError(
-            f"Failed to load model: missing keys: {missing}, unexpected keys: {unexpected}"
-        )
+    model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
-    ref_model = utils.load_model(config.model)
-    missing, unexpected = load_model(ref_model, ckpt, device="cuda")
-    if missing or unexpected:
-        raise ValueError(
-            f"Failed to load reference model: missing keys: {missing}, unexpected keys: {unexpected}"
-        )
+    ref_model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     runid, save_dir = _create_runid_and_path(config, "dpo")
     # save tokenizer and config
     tokenizer = config.model.load_tokenizer()
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
     utils.save_config(config, Path(save_dir) / "config.yaml")
     tokenizer.save_pretrained(save_dir, save_jinja_files=False)
     # prepare dataset
@@ -199,11 +198,13 @@ def train_dpo(config: Config, ckpt: Path, use_wandb: bool):
     dataset = _load_dataset_raw(args.dataset)
     raw_training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args = DPOConfig(**raw_training_args.to_dict())
+    training_args.max_length = args.context_length
     trainer = DPOTrainer(
         model=model,
         ref_model=ref_model,
         args=training_args,
         train_dataset=dataset,
+        processing_class=tokenizer,
     )
     trainer.train()
     trainer.save_model(save_dir)

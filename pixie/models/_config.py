@@ -91,7 +91,7 @@ type OptimizerConfig = Annotated[AdamWOptimizerConfig, Field(discriminator="name
 class BaseTrainingConfig(BaseModel):
     dataset: str | DatasetConfig
     context_length: int
-    batch_size: int
+    batch_size: int | Literal["auto"]
 
     epochs: int = 1
     grad_clip: float = 1.0

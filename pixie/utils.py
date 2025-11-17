@@ -1,4 +1,4 @@
-from .models import Config, ModelConfig, BaseGPTModel, MODELS
+from .models._model import Config, ModelConfig, BaseGPTModel, MODELS
 from pathlib import Path
 import yaml
 from typing import Any
