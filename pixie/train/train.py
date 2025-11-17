@@ -4,6 +4,7 @@ from transformers import TrainingArguments
 from datasets import load_dataset, Dataset
 from pixie import utils
 from pixie.models._config import (
+    AdamWOptimizerConfig,
     DatasetConfig,
     Config,
     BaseTrainingConfig,
@@ -95,6 +96,7 @@ def _load_dataset_raw(
 def _get_trainning_args(
     args: BaseTrainingConfig, model_save_dir: str, use_wandb: bool
 ) -> TrainingArguments:
+    assert isinstance(args.optimizer, AdamWOptimizerConfig)
     return TrainingArguments(
         output_dir=model_save_dir,
         overwrite_output_dir=True,
@@ -109,7 +111,7 @@ def _get_trainning_args(
         save_strategy="no",  # "steps",
         save_steps=5000,
         lr_scheduler_type="cosine",
-        learning_rate=5e-4,
+        learning_rate=args.optimizer.learning_rate,
         torch_compile=True,
         torch_compile_mode="default",
         # Evaluation args

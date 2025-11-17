@@ -85,9 +85,7 @@ class LionOptimizerConfig(BaseModel):
     weight_decay: float = 1e-2
 
 
-type OptimizerConfig = Annotated[
-    AdamWOptimizerConfig | LionOptimizerConfig, Field(discriminator="name")
-]
+type OptimizerConfig = Annotated[AdamWOptimizerConfig, Field(discriminator="name")]
 
 
 class BaseTrainingConfig(BaseModel):
@@ -100,7 +98,7 @@ class BaseTrainingConfig(BaseModel):
     warmup_steps: int | None = 400
     accumulation_steps: int = 8
     gradient_checkpointing: bool = False
-    optimizer: OptimizerConfig | Literal["adamw", "lion"] = "adamw"
+    optimizer: OptimizerConfig | Literal["adamw"] = "adamw"
 
 
 class PretrainConfig(BaseTrainingConfig): ...
