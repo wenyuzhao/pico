@@ -32,7 +32,7 @@ def info(config_name: str, verbose: bool = False):
     print(f"Attention Heads: {config.model.num_attention_heads}")
     print(f"Feed Forward Size: {config.model.feed_forward_size}")
     print(
-        f"Tokenizer: {config.model.tokenizer} (vocab size: {model.config.vocab_size})"
+        f"Tokenizer: {config.model.tokenizer} (vocab size: {model.args.get_vocab_size()})"
     )
     if verbose:
         print("\nFull Configuration:")

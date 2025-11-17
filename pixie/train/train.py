@@ -5,6 +5,7 @@ from datasets import load_dataset, Dataset
 from pixie import utils
 from pixie.models._base import (
     AdamWOptimizerConfig,
+    LionOptimizerConfig,
     DatasetConfig,
     Config,
     BaseTrainingConfig,
@@ -68,7 +69,27 @@ def _load_dataset(
 def _get_trainning_args(
     args: BaseTrainingConfig, model_save_dir: str, use_wandb: bool
 ) -> TrainingArguments:
-    assert isinstance(args.optimizer, AdamWOptimizerConfig)
+    # assert isinstance(args.optimizer, AdamWOptimizerConfig)
+    optim: AdamWOptimizerConfig | LionOptimizerConfig = (
+        args.optimizer
+        if isinstance(args.optimizer, (AdamWOptimizerConfig, LionOptimizerConfig))
+        else (
+            AdamWOptimizerConfig()
+            if args.optimizer == "adamw"
+            else LionOptimizerConfig()
+        )
+    )
+    if isinstance(optim, AdamWOptimizerConfig):
+        learning_rate = optim.learning_rate
+        betas = optim.betas
+        eps = optim.eps
+        weight_decay = optim.weight_decay
+    else:
+        learning_rate = optim.learning_rate
+        betas = optim.betas
+        eps = None
+        weight_decay = optim.weight_decay
+
     return TrainingArguments(
         output_dir=model_save_dir,
         overwrite_output_dir=True,
@@ -86,10 +107,15 @@ def _get_trainning_args(
         save_strategy="no",  # "steps",
         save_steps=5000,
         lr_scheduler_type="cosine",
-        learning_rate=args.optimizer.learning_rate,
         torch_compile=True,
         torch_compile_mode="default",
         half_precision_backend="cpu_amp",
+        optim="adamw_torch" if optim.name == "adamw" else "lion_32bit",
+        learning_rate=optim.learning_rate,
+        weight_decay=weight_decay,
+        adam_beta1=betas[0],
+        adam_beta2=betas[1],
+        adam_epsilon=eps if eps is not None else 1e-8,
         # Evaluation args
         do_eval=False,
         # Logging args

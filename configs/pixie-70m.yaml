@@ -2,9 +2,9 @@ import: default.yaml
 
 model:
   name: pixie
-  tokenizer: microsoft/phi-4
+  tokenizer: LiquidAI/LFM2-350M
   hidden_size: 512
-  num_hidden_layers: 8
+  num_hidden_layers: 12
   num_attention_heads: 8
   num_kv_attention_heads: 2
-  feed_forward_size: 1408
+  feed_forward_size: 1700

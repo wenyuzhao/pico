@@ -83,15 +83,21 @@ class DatasetConfig(BaseModel):
 class AdamWOptimizerConfig(BaseModel):
     name: Literal["adamw"] = "adamw"
     learning_rate: float = 5e-4
+    weight_decay: float = 0.01
+    betas: tuple[float, float] = (0.9, 0.999)
+    eps: float = 1e-8
 
 
 class LionOptimizerConfig(BaseModel):
     name: Literal["lion"] = "lion"
     learning_rate: float = 1e-4
-    weight_decay: float = 1e-2
+    weight_decay: float = 0.01
+    betas: tuple[float, float] = (0.9, 0.99)
 
 
-type OptimizerConfig = Annotated[AdamWOptimizerConfig, Field(discriminator="name")]
+type OptimizerConfig = Annotated[
+    AdamWOptimizerConfig | LionOptimizerConfig, Field(discriminator="name")
+]
 
 
 class BaseTrainingConfig(BaseModel):
@@ -104,7 +110,7 @@ class BaseTrainingConfig(BaseModel):
     warmup_steps: int | None = 400
     accumulation_steps: int = 8
     gradient_checkpointing: bool = False
-    optimizer: OptimizerConfig | Literal["adamw"] = "adamw"
+    optimizer: OptimizerConfig | Literal["adamw", "lion"] = "adamw"
 
 
 class PretrainConfig(BaseTrainingConfig): ...

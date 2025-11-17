@@ -1,7 +1,6 @@
 import: pixie-70m.yaml
 
 override:
-  pretrain.dataset: datasets/fineweb-bbc-news
-  pretrain.optimizer:
-    name: adamw
-    learning_rate: 5e-4
+  pretrain.dataset: vblagoje/cc_news
+  sft: null
+  dpo: null

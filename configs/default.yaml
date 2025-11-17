@@ -1,6 +1,6 @@
 model:
   name: pixie
-  tokenizer: microsoft/phi-4
+  tokenizer: LiquidAI/LFM2-350M
   hidden_size: 512
   num_hidden_layers: 8
   hidden_act: silu
