@@ -4,15 +4,14 @@ import torch.nn.functional as F
 import torch
 from typing import cast
 from transformers import PreTrainedTokenizerFast
-from torch import nn
+from torch import Tensor, nn
 from transformers import Trainer
 
 
 def preprocess(
     data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
-) -> dict[str, torch.Tensor]:
-    assert config.pretrain
-    max_length = config.pretrain.context_length
+) -> dict[str, Tensor]:
+    max_length = config.train["pretrain"].context_length
     possible_text_columns = ["text", "content"]
     col_name: str | None = None
     for col in possible_text_columns:
@@ -30,30 +29,38 @@ def preprocess(
         add_special_tokens=False,
         return_overflowing_tokens=True,
     )
-    tokens = cast(dict[str, torch.Tensor], tokens)
+    tokens = cast(dict[str, Tensor], tokens)
     return {"input_ids": tokens["input_ids"], "loss_mask": tokens["attention_mask"]}
 
 
 class PretrainTrainer(Trainer):
+    think_tokens: list[int] | None = None
+
     @torch.compile
-    def __compute_loss(
-        self, out: Any, Y: torch.Tensor, mask: torch.Tensor
-    ) -> torch.Tensor:
+    def __compute_loss(self, out: Any, Y: Tensor, loss_mask: Tensor) -> Tensor:
         loss = F.cross_entropy(
             out.logits.view(-1, out.logits.size(-1)),
             Y.view(-1),
             reduction="none",
         ).view(Y.size())
-        loss = (loss * mask).sum() / mask.sum()
+        # Increase loss weight for think tokens
+        if self.think_tokens:
+            think_token_pos = torch.isin(
+                Y.view(-1), torch.tensor(self.think_tokens).to(self.args.device)
+            )
+            loss_mask = loss_mask.reshape(-1)
+            loss_mask[think_token_pos] = 10
+            loss_mask = loss_mask.view(Y.size())
+        loss = (loss * loss_mask).sum() / loss_mask.sum()
         loss = loss / self.args.gradient_accumulation_steps
         return loss
 
     def compute_loss(
         self,
         model: nn.Module,
-        inputs: dict[str, Union[torch.Tensor, Any]],
+        inputs: dict[str, Union[Tensor, Any]],
         return_outputs: bool = False,
-        num_items_in_batch: Optional[torch.Tensor] = None,
+        num_items_in_batch: Optional[Tensor] = None,
     ):
         if self.model_accepts_loss_kwargs:
             kwargs = {}

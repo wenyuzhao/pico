@@ -12,7 +12,8 @@ import shutil
 
 
 class GenerationConfig(BaseModel):
-    max_new_tokens: int
+    max_length: int | None = None
+    max_new_tokens: int | None = None
     temperature: float
     top_p: float
     repetition_penalty: float
@@ -100,7 +101,7 @@ type OptimizerConfig = Annotated[
 ]
 
 
-class BaseTrainingConfig(BaseModel):
+class TrainingConfig(BaseModel):
     dataset: str | DatasetConfig
     context_length: int
     batch_size: int | Literal["auto"]
@@ -111,24 +112,15 @@ class BaseTrainingConfig(BaseModel):
     accumulation_steps: int = 8
     gradient_checkpointing: bool = False
     optimizer: OptimizerConfig | Literal["adamw", "lion"] = "adamw"
+    think_tokens: list[str] | None = None
 
-
-class PretrainConfig(BaseTrainingConfig): ...
-
-
-class SFTConfig(BaseTrainingConfig): ...
-
-
-class DPOConfig(BaseTrainingConfig):
     beta: float = 0.1
 
 
 class Config(BaseModel):
     name: str | None = None
     model: ModelConfig
-    pretrain: PretrainConfig | None = None
-    sft: SFTConfig | None = None
-    dpo: DPOConfig | None = None
+    train: dict[str, TrainingConfig] = Field(default_factory=dict)
 
 
 class BaseCasualLM[C: ModelConfig](PreTrainedModel, GenerationMixin):
@@ -145,7 +137,10 @@ class BaseCasualLM[C: ModelConfig](PreTrainedModel, GenerationMixin):
         assert self.generation_config
         gcfg = self.args.generation
         if gcfg is not None:
-            self.generation_config.max_new_tokens = gcfg.max_new_tokens
+            if gcfg.max_new_tokens is not None:
+                self.generation_config.max_new_tokens = gcfg.max_new_tokens
+            if gcfg.max_length is not None:
+                self.generation_config.max_length = gcfg.max_length
             self.generation_config.do_sample = gcfg.do_sample
             self.generation_config.temperature = gcfg.temperature
             self.generation_config.top_p = gcfg.top_p

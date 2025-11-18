@@ -29,8 +29,7 @@ def _get_conversations(
 def _process_batch_impl(
     samples: list[list[Message]], config: Config, tok: PreTrainedTokenizerFast
 ) -> dict[str, torch.Tensor]:
-    assert config.dpo
-    max_length = config.dpo.context_length
+    max_length = config.train["dpo"].context_length
     r = tok.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),
         tokenize=True,
@@ -99,9 +98,10 @@ def dpo_loss(
 
 
 class DPOTrainer(Trainer):
-    def __init__(self, *args: Any, ref_model: nn.Module, **kwargs: Any):
+    def __init__(self, *args: Any, ref_model: nn.Module, beta: float, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.ref_model = torch.compile(ref_model, mode="default").to(self.args.device)  # type: ignore
+        self.beta = beta
 
     def compute_loss(
         self,
@@ -146,7 +146,7 @@ class DPOTrainer(Trainer):
             self._past = outputs[self.args.past_index]
 
         probs = logits_to_probs(outputs.logits, Y) * loss_mask
-        loss = dpo_loss(ref_probs, probs, loss_mask, beta=0.1)
+        loss = dpo_loss(ref_probs, probs, loss_mask, beta=self.beta)
 
         if (
             self.args.average_tokens_across_devices

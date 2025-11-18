@@ -39,7 +39,16 @@ def info(config_name: str, verbose: bool = False):
         print(config.model_dump())
 
 
-@app.command()
+train_app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    context_settings=dict(help_option_names=["-h", "--help"]),
+    pretty_exceptions_short=True,
+    pretty_exceptions_show_locals=False,
+)
+
+
+@train_app.command()
 def pretrain(
     config_name: str,
     wandb: bool = False,
@@ -48,10 +57,11 @@ def pretrain(
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = utils.load_config(f"configs/{config_name}.yaml")
+    assert "pretrain" in config.train, "Pretrain configuration is missing."
     train_pretrain(config, use_wandb=wandb, dry_run=dry_run)
 
 
-@app.command()
+@train_app.command()
 def sft(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
     wandb: bool = False,
@@ -61,11 +71,11 @@ def sft(
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
-    assert config.sft is not None, "SFT configuration is missing."
-    train_sft(config, ckpt, use_wandb=wandb, dry_run=dry_run)
+    assert "sft" in config.train, "SFT configuration is missing."
+    train_sft(config, ckpt, use_wandb=wandb, dry_run=dry_run, key="sft")
 
 
-@app.command()
+@train_app.command()
 def dpo(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
     wandb: bool = False,
@@ -75,8 +85,25 @@ def dpo(
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
-    assert config.dpo is not None, "DPO configuration is missing."
+    assert "dpo" in config.train, "DPO configuration is missing."
     train_dpo(config, ckpt, use_wandb=wandb, dry_run=dry_run)
+
+
+@train_app.command()
+def reason(
+    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
+    wandb: bool = False,
+    dry_run: bool = False,
+):
+    dotenv.load_dotenv()
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+    assert ckpt.is_dir()
+    config = utils.load_config(ckpt / "config.yaml")
+    assert "reason" in config.train, "Reason configuration is missing."
+    train_sft(config, ckpt, use_wandb=wandb, dry_run=dry_run, key="reason")
+
+
+app.add_typer(train_app, name="train", help="Training related commands.")
 
 
 @app.command(name="export-onnx")

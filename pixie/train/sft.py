@@ -67,8 +67,7 @@ def _get_conversations(data: dict[str, Any]) -> list[list[dict[str, str]]]:
 def preprocess(
     data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
 ) -> dict[str, torch.Tensor]:
-    assert config.sft
-    max_length = config.sft.context_length
+    max_length = config.train["sft"].context_length
     samples = _get_conversations(data)
     tokens = tokenizer.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),

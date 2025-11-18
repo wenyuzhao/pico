@@ -9,7 +9,7 @@ from pixie.models._base import (
     LionOptimizerConfig,
     DatasetConfig,
     Config,
-    BaseTrainingConfig,
+    TrainingConfig,
 )
 from pixie.train import pretrain, sft, dpo
 from typing import Any
@@ -34,8 +34,8 @@ def _create_runid_and_path(
     #     ...
     runid += "-" + time.strftime("%Y%m%d-%H%M%S")
     print(f"Run ID: {runid}")
-    os.environ["WANDB_PROJECT"] = f"{config.name}-{type}"
-    os.environ["WANDB_NAME"] = runid
+    os.environ["WANDB_PROJECT"] = f"{config.name}"
+    os.environ["WANDB_NAME"] = type + "-" + runid
     if dry_run:
         path = Path("out/scratch")
     else:
@@ -82,7 +82,7 @@ def _load_dataset(
 
 
 def _get_trainning_args(
-    args: BaseTrainingConfig, model_save_dir: str, use_wandb: bool
+    args: TrainingConfig, model_save_dir: str, use_wandb: bool
 ) -> TrainingArguments:
     # assert isinstance(args.optimizer, AdamWOptimizerConfig)
     optim: AdamWOptimizerConfig | LionOptimizerConfig = (
@@ -152,8 +152,7 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool):
     tokenizer = config.model.load_tokenizer()
     runid, save_dir = _create_runid_and_path(config, "pretrain", tokenizer, dry_run)
     # prepare dataset
-    assert config.pretrain is not None
-    args = config.pretrain
+    args = config.train["pretrain"]
     dataset = _load_dataset(args.dataset, pretrain.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
     # count tokens
@@ -172,14 +171,13 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool):
         trainer.save_model(save_dir)
 
 
-def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
+def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, key="sft"):
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     tokenizer = config.model.load_tokenizer()
     print(f"Loaded checkpoint from {ckpt}")
-    runid, save_dir = _create_runid_and_path(config, "sft", tokenizer, dry_run)
+    runid, save_dir = _create_runid_and_path(config, key, tokenizer, dry_run)
     # prepare dataset
-    assert config.sft is not None
-    args = config.sft
+    args = config.train[key]
     dataset = _load_dataset(args.dataset, sft.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
     # count tokens
@@ -193,6 +191,11 @@ def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
         args=training_args,
         train_dataset=dataset,
     )
+    if args.think_tokens:
+        tokens = []
+        for t in args.think_tokens:
+            tokens.extend(tokenizer(t).input_ids)
+        trainer.think_tokens = tokens
     trainer.train()
     trainer.save_model(save_dir)
 
@@ -204,8 +207,7 @@ def train_dpo(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
     ref_model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     runid, save_dir = _create_runid_and_path(config, "dpo", tokenizer, dry_run)
     # prepare dataset
-    assert config.dpo is not None
-    args = config.dpo
+    args = config.train["dpo"]
     dataset = _load_dataset(args.dataset, dpo.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
     training_args = _get_trainning_args(args, save_dir, use_wandb)
@@ -220,6 +222,7 @@ def train_dpo(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
         ref_model=ref_model,
         args=training_args,
         train_dataset=dataset,
+        beta=args.beta,
     )
     trainer.train()
     trainer.save_model(save_dir)
