@@ -42,7 +42,6 @@ def info(config_name: str, verbose: bool = False):
 @app.command()
 def pretrain(
     config_name: str,
-    proj: Annotated[str | None, typer.Option("--project", "-p")] = None,
     wandb: bool = False,
 ):
     dotenv.load_dotenv()
@@ -54,7 +53,6 @@ def pretrain(
 @app.command()
 def sft(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
-    proj: Annotated[str | None, typer.Option("--project", "-p")] = None,
     wandb: bool = False,
 ):
     dotenv.load_dotenv()
@@ -68,7 +66,6 @@ def sft(
 @app.command()
 def dpo(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
-    proj: Annotated[str | None, typer.Option("--project", "-p")] = None,
     wandb: bool = False,
 ):
     dotenv.load_dotenv()
@@ -77,6 +74,16 @@ def dpo(
     config = utils.load_config(ckpt / "config.yaml")
     assert config.dpo is not None, "DPO configuration is missing."
     train_dpo(config, ckpt, use_wandb=wandb)
+
+
+@app.command(name="export-onnx")
+def export_onnx(
+    ckpt: Annotated[Path, typer.Argument(...)],
+    task: Annotated[str, typer.Option("--task")] = "text-generation",
+):
+    from pixie.onnx import export_onnx
+
+    export_onnx(ckpt, task)
 
 
 dataset_app = typer.Typer(
