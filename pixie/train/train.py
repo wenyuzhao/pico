@@ -30,7 +30,9 @@ def _create_runid_and_path(config: Config, type: str) -> tuple[str, str]:
     #     ...
     runid += "-" + time.strftime("%Y%m%d-%H%M%S")
     print(f"Run ID: {runid}")
-    path = Path("out") / (config.name + "-x") / type / runid
+    path = Path("out") / config.name / type / runid
+    os.environ["WANDB_PROJECT"] = f"{config.name}-{type}"
+    os.environ["WANDB_NAME"] = runid
     return runid, str(path)
 
 
