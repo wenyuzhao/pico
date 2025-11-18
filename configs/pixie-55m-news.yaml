@@ -1,0 +1,8 @@
+import: default.yaml
+
+override:
+  pretrain.dataset: vblagoje/cc_news
+  pretrain.context_length: 512
+  pretrain.batch_size: 16
+  sft: null
+  dpo: null
