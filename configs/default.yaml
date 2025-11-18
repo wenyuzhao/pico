@@ -25,7 +25,7 @@ model:
 
 pretrain:
   dataset:
-    path: datasets/pile
+    name: datasets/pile
     ratio: 0.1
   context_length: 1024
   batch_size: 4

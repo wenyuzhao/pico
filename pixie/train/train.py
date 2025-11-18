@@ -1,5 +1,6 @@
 from pathlib import Path
 import os, time
+from torch import Tensor
 from transformers import TrainingArguments
 from datasets import load_dataset, Dataset
 from pixie import utils
@@ -13,9 +14,12 @@ from pixie.models._base import (
 from pixie.train import pretrain, sft, dpo
 from typing import Any
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
+from transformers import PreTrainedTokenizerBase
 
 
-def _create_runid_and_path(config: Config, type: str) -> tuple[str, str]:
+def _create_runid_and_path(
+    config: Config, type: str, tokenizer: PreTrainedTokenizerBase, dry_run: bool
+) -> tuple[str, str]:
     assert config.name
     runid = config.name
     # if project is not None:
@@ -30,9 +34,16 @@ def _create_runid_and_path(config: Config, type: str) -> tuple[str, str]:
     #     ...
     runid += "-" + time.strftime("%Y%m%d-%H%M%S")
     print(f"Run ID: {runid}")
-    path = Path("out") / config.name / type / runid
     os.environ["WANDB_PROJECT"] = f"{config.name}-{type}"
     os.environ["WANDB_NAME"] = runid
+    if dry_run:
+        path = Path("out/scratch")
+    else:
+        path = Path("out") / config.name / type / runid
+    if not dry_run:
+        path.mkdir(parents=True, exist_ok=True)
+        utils.save_config(config, path / "config.yaml")
+        tokenizer.save_pretrained(path, save_jinja_files=False)
     return runid, str(path)
 
 
@@ -45,14 +56,16 @@ def _load_dataset(
     if isinstance(dataset_config, str):
         path = Path(dataset_config)
         if path.is_file():
-            ds = DatasetConfig(path=str(path.parent), data_files=[str(path.name)])
+            ds = DatasetConfig(name=str(path.parent), data_files=[str(path.name)])
         else:
-            ds = DatasetConfig(path=dataset_config)
+            ds = DatasetConfig(name=dataset_config)
     else:
         ds = dataset_config
     dataset = load_dataset(
-        ds.path,
-        split=f"train[:{ds.ratio * 100}%]" if ds.ratio else "train",
+        ds.name,
+        split=(
+            f"train[:{round(ds.ratio * 100)}%]" if ds.ratio is not None else "train"
+        ),
         data_dir=ds.data_dir,
         data_files=ds.data_files,
     )
@@ -128,19 +141,25 @@ def _get_trainning_args(
     )
 
 
-def train_pretrain(config: Config, use_wandb: bool):
+def _count_tokens(dataset: Dataset) -> int:
+    size = len(dataset[0]["input_ids"])
+    total_tokens = size * len(dataset)
+    return total_tokens
+
+
+def train_pretrain(config: Config, use_wandb: bool, dry_run: bool):
     model = utils.load_model(config.model)
     tokenizer = config.model.load_tokenizer()
-    runid, save_dir = _create_runid_and_path(config, "pretrain")
-    # save tokenizer and config
-    Path(save_dir).mkdir(parents=True, exist_ok=True)
-    utils.save_config(config, Path(save_dir) / "config.yaml")
-    tokenizer.save_pretrained(save_dir, save_jinja_files=False)
+    runid, save_dir = _create_runid_and_path(config, "pretrain", tokenizer, dry_run)
     # prepare dataset
     assert config.pretrain is not None
     args = config.pretrain
     dataset = _load_dataset(args.dataset, pretrain.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
+    # count tokens
+    tokens = _count_tokens(dataset)
+    billion_tokens = tokens / 1_000_000_000
+    print(f"Total tokens in dataset: {tokens} ({billion_tokens:.2f}B)")
     training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args.label_names = ["loss_mask"]
     trainer = pretrain.PretrainTrainer(
@@ -149,23 +168,24 @@ def train_pretrain(config: Config, use_wandb: bool):
         train_dataset=dataset,
     )
     trainer.train()
-    trainer.save_model(save_dir)
+    if not dry_run:
+        trainer.save_model(save_dir)
 
 
-def train_sft(config: Config, ckpt: Path, use_wandb: bool):
+def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
-    print(f"Loaded checkpoint from {ckpt}")
-    runid, save_dir = _create_runid_and_path(config, "sft")
-    # save tokenizer and config
     tokenizer = config.model.load_tokenizer()
-    Path(save_dir).mkdir(parents=True, exist_ok=True)
-    utils.save_config(config, Path(save_dir) / "config.yaml")
-    tokenizer.save_pretrained(save_dir, save_jinja_files=False)
+    print(f"Loaded checkpoint from {ckpt}")
+    runid, save_dir = _create_runid_and_path(config, "sft", tokenizer, dry_run)
     # prepare dataset
     assert config.sft is not None
     args = config.sft
     dataset = _load_dataset(args.dataset, sft.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
+    # count tokens
+    tokens = _count_tokens(dataset)
+    billion_tokens = tokens / 1_000_000_000
+    print(f"Total tokens in dataset: {tokens} ({billion_tokens:.2f}B)")
     training_args = _get_trainning_args(args, save_dir, use_wandb)
     training_args.label_names = ["loss_mask"]
     trainer = sft.SFTTrainer(
@@ -177,16 +197,12 @@ def train_sft(config: Config, ckpt: Path, use_wandb: bool):
     trainer.save_model(save_dir)
 
 
-def train_dpo(config: Config, ckpt: Path, use_wandb: bool):
+def train_dpo(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
+    tokenizer = config.model.load_tokenizer()
     print(f"Loaded checkpoint from {ckpt}")
     ref_model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
-    runid, save_dir = _create_runid_and_path(config, "dpo")
-    # save tokenizer and config
-    tokenizer = config.model.load_tokenizer()
-    Path(save_dir).mkdir(parents=True, exist_ok=True)
-    utils.save_config(config, Path(save_dir) / "config.yaml")
-    tokenizer.save_pretrained(save_dir, save_jinja_files=False)
+    runid, save_dir = _create_runid_and_path(config, "dpo", tokenizer, dry_run)
     # prepare dataset
     assert config.dpo is not None
     args = config.dpo

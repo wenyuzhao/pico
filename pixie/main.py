@@ -43,37 +43,40 @@ def info(config_name: str, verbose: bool = False):
 def pretrain(
     config_name: str,
     wandb: bool = False,
+    dry_run: bool = False,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = utils.load_config(f"configs/{config_name}.yaml")
-    train_pretrain(config, use_wandb=wandb)
+    train_pretrain(config, use_wandb=wandb, dry_run=dry_run)
 
 
 @app.command()
 def sft(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
     wandb: bool = False,
+    dry_run: bool = False,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
     assert config.sft is not None, "SFT configuration is missing."
-    train_sft(config, ckpt, use_wandb=wandb)
+    train_sft(config, ckpt, use_wandb=wandb, dry_run=dry_run)
 
 
 @app.command()
 def dpo(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
     wandb: bool = False,
+    dry_run: bool = False,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
     config = utils.load_config(ckpt / "config.yaml")
     assert config.dpo is not None, "DPO configuration is missing."
-    train_dpo(config, ckpt, use_wandb=wandb)
+    train_dpo(config, ckpt, use_wandb=wandb, dry_run=dry_run)
 
 
 @app.command(name="export-onnx")

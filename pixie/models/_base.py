@@ -74,7 +74,7 @@ class ModelConfig(BaseModel):
 
 
 class DatasetConfig(BaseModel):
-    path: str
+    name: str
     ratio: float | None = None
     data_dir: str | None = None
     data_files: list[str] | None = None
