@@ -148,7 +148,6 @@ class BaseCasualLM[C: ModelConfig](PreTrainedModel, GenerationMixin):
             self.generation_config.pad_token_id = tok.pad_token_id
             self.generation_config.eos_token_id = tok.eos_token_id
             self.generation_config.use_cache = gcfg.use_cache
-        self.out = CausalLMOutputWithPast()
         self.model: nn.Module
 
     @override
