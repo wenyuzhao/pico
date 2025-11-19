@@ -13,6 +13,8 @@ from ._base import (
     PretrainedConfig,
     BasePretrainedConfig,
 )
+from transformers.cache_utils import Cache
+from torch.nn.attention.bias import causal_lower_right
 
 
 class PixieConfig(ModelConfig): ...
@@ -21,15 +23,35 @@ class PixieConfig(ModelConfig): ...
 type PositionEmbedding = tuple[Tensor, Tensor]
 
 
+class KVCache:
+    def __init__(self, num_layers: int):
+        self.layers: list[tuple[Tensor, Tensor] | None] = [None] * num_layers
+
+    def update(self, layer_idx: int, k: Tensor, v: Tensor) -> tuple[Tensor, Tensor]:
+        # k, v: [batch_size, seq_len, num_kv_attention_heads, head_dim]
+        if self.layers[layer_idx] is None:
+            self.layers[layer_idx] = (k, v)
+        else:
+            x = self.layers[layer_idx]
+            assert x
+            cached_k, cached_v = x
+            k = torch.cat([cached_k, k], dim=1)
+            v = torch.cat([cached_v, v], dim=1)
+            self.layers[layer_idx] = (k, v)
+        return k, v
+
+
 class MultiHeadAttention(nn.Module):
     def __init__(
         self,
+        layer_idx: int,
         hidden_size: int,
         num_attention_heads: int,
         num_kv_attention_heads: int | None = None,
         dropout: float = 0.1,
     ):
         super().__init__()
+        self.layer_idx = layer_idx
         num_kv_attention_heads = num_kv_attention_heads or num_attention_heads
         assert num_attention_heads % num_kv_attention_heads == 0
         assert hidden_size % num_attention_heads == 0
@@ -67,7 +89,12 @@ class MultiHeadAttention(nn.Module):
         k_embed = (k * cos) + (rotate_half(k) * sin)
         return q_embed.type_as(q), k_embed.type_as(k)
 
-    def forward(self, x: Tensor, position_embedding: PositionEmbedding) -> Tensor:
+    def forward(
+        self,
+        x: Tensor,
+        position_embedding: PositionEmbedding,
+        past_key_values: KVCache | None = None,
+    ) -> Tensor:
         batch_size, seq_len, _hidden_size = x.shape
         q = self.wq(x)  # [batch_size, seq_len, num_attention_heads * self.head_dim]
         k, v = self.wk(x), self.wv(
@@ -79,16 +106,28 @@ class MultiHeadAttention(nn.Module):
         v = v.view(batch_size, seq_len, self.num_kv_attention_heads, self.head_dim)
         # Apply positional encoding
         cos, sin = position_embedding  # each of shape [seq_len, head_dim]
-        q, k = self.apply_rotary_pos_emb(q, k, cos[:seq_len], sin[:seq_len])
+        q, k = self.apply_rotary_pos_emb(q, k, cos, sin)
+        # KV cache
+        if past_key_values is not None:
+            k, v = past_key_values.update(self.layer_idx, k, v)
         # transpose to [batch_size, num_attention_heads or num_kv_attention_heads, seq_len, head_dim]
         q, k, v = (a.transpose(1, 2) for a in (q, k, v))
-        # Repeat kv heads to match q heads: [batch_size, seq_len, num_attention_heads, head_dim]
-        k = k.repeat_interleave(self.kv_rep, -3)
-        v = v.repeat_interleave(self.kv_rep, -3)
         # Apply scaled dot-product attention
         dropout_p = self.dropout if self.training else 0.0
+        if past_key_values is not None:
+            attn_bias = causal_lower_right(seq_len, k.shape[2])
+            is_causal = False
+        else:
+            attn_bias = None
+            is_causal = False
         output = F.scaled_dot_product_attention(
-            q, k, v, dropout_p=dropout_p, is_causal=True
+            q,
+            k,
+            v,
+            dropout_p=dropout_p,
+            is_causal=is_causal,
+            enable_gqa=self.kv_rep > 1,
+            attn_mask=attn_bias,
         )
         assert output.shape == (
             batch_size,
@@ -127,6 +166,7 @@ class FeedForward(nn.Module):
 class TransformerBlock(nn.Module):
     def __init__(
         self,
+        layer_idx: int,
         hidden_size: int,
         num_attention_heads: int,
         num_kv_attention_heads: int | None = None,
@@ -136,6 +176,7 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
         self.attention = MultiHeadAttention(
+            layer_idx=layer_idx,
             hidden_size=hidden_size,
             num_attention_heads=num_attention_heads,
             num_kv_attention_heads=num_kv_attention_heads,
@@ -150,13 +191,20 @@ class TransformerBlock(nn.Module):
         self.input_norm = RMSNorm(hidden_size, eps=1e-5)
         self.attention_norm = RMSNorm(hidden_size, eps=1e-5)
 
-    def forward(self, x: Tensor, position_embedding: PositionEmbedding):
+    def forward(
+        self,
+        x: Tensor,
+        position_embedding: PositionEmbedding,
+        past_key_values: KVCache | None = None,
+    ) -> Tensor:
         x2 = x
         # Attention
-        x = (
-            self.attention(self.input_norm(x), position_embedding=position_embedding)
-            + x2
+        x = self.attention(
+            self.input_norm(x),
+            position_embedding=position_embedding,
+            past_key_values=past_key_values,
         )
+        x = x + x2
         # Feed Forward
         x = x + self.feed_forward(self.attention_norm(x))
         return x
@@ -188,6 +236,7 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList(
             [
                 TransformerBlock(
+                    layer_idx=i,
                     hidden_size=config.hidden_size,
                     num_attention_heads=config.num_attention_heads,
                     num_kv_attention_heads=config.num_kv_attention_heads,
@@ -195,7 +244,7 @@ class Transformer(nn.Module):
                     act=config.hidden_act,
                     dropout=config.dropout,
                 )
-                for _ in range(self.num_hidden_layers)
+                for i in range(self.num_hidden_layers)
             ]
         )
         # Final normalization
@@ -256,19 +305,26 @@ class Transformer(nn.Module):
         freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)
         return freqs_cos, freqs_sin
 
-    def forward(self, x: Tensor, **args) -> Tensor:
+    def forward(
+        self, x: Tensor, past_key_values: KVCache | None = None, **args
+    ) -> Tensor:
         _batch_size, seq_len = x.shape
         # Embedding and positional encoding
         tok_embeds = self.tok_emb(x)  # [batch_size, seq_len, hidden_size]
         x = self.dropout_emb(tok_embeds)  # [batch_size, seq_len, hidden_size]
         # Transformer layers
-        start = 0
+        if past_key_values is None or past_key_values.layers[0] is None:
+            start = 0
+        else:
+            start = past_key_values.layers[0][0].shape[1]
         pos = (
             self.freqs_cos[start : start + seq_len],
             self.freqs_sin[start : start + seq_len],
         )
         for layer in self.layers:
-            x = layer(x, position_embedding=pos)  # [batch_size, seq_len, hidden_size]
+            x = layer(
+                x, position_embedding=pos, past_key_values=past_key_values
+            )  # [batch_size, seq_len, hidden_size]
         # Final normalization and linear layer
         x = self.norm(x)  # [batch_size, seq_len, hidden_size]
         logits = self.out(x)  # [batch_size, seq_len, vocab_size]
@@ -288,16 +344,32 @@ class Pixie(BaseCasualLM[PixieConfig]):
         super().__init__(config)
         self.model = Transformer(config)
 
-    def forward(self, input_ids: Tensor, **kwargs) -> CausalLMOutputWithPast:
-        # print(kwargs)
-        logits = self.model(input_ids)
-        self.out["logits"] = logits
+    def forward(
+        self,
+        input_ids: Tensor,
+        past_key_values: Cache | KVCache | None = None,
+        use_cache: bool = False,
+        **kwargs,
+    ) -> CausalLMOutputWithPast:
+        if use_cache:
+            if isinstance(past_key_values, Cache) or past_key_values is None:
+                cache = KVCache(self.config.num_hidden_layers)
+            else:
+                cache = past_key_values
+        else:
+            cache = None
+        logits = self.model(input_ids, past_key_values=cache)
         if "labels" in kwargs:
-            self.out["loss"] = self.loss_function(
+            loss = self.loss_function(
                 logits=logits,
                 # labels=kwargs["labels"],
                 vocab_size=self.args.get_vocab_size(),
                 **kwargs,
             )
-            self.out["loss"] = self.out["loss"]
-        return self.out
+        else:
+            loss = None
+        return CausalLMOutputWithPast(
+            logits=logits,
+            loss=loss,
+            past_key_values=cache,  # type: ignore
+        )

@@ -16,7 +16,7 @@ model:
     top_p: 0.95
     repetition_penalty: 1.15
     do_sample: true
-    use_cache: false
+    use_cache: true
 
 train:
   pretrain:
