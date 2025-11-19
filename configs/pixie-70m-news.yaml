@@ -1,6 +1,6 @@
 import: pixie-70m.yaml
 
 override:
-  pretrain.dataset: vblagoje/cc_news
+  train.pretrain.dataset: vblagoje/cc_news
   sft: null
   dpo: null

@@ -21,45 +21,43 @@ model:
     top_p: 0.95
     repetition_penalty: 1.15
     do_sample: true
-    use_cache: false
+    use_cache: true
 
-pretrain:
-  dataset:
-    name: datasets/pile
-    ratio: 0.1
-  context_length: 1024
-  batch_size: 4
-  epochs: 1
-  grad_clip: 1.0
-  warmup_steps: 400
-  accumulation_steps: 8
-  optimizer:
-    name: lion
-    learning_rate: 1e-4
-    weight_decay: 0.01
+train:
+  pretrain:
+    dataset:
+      name: datasets/pile
+      ratio: 0.1
+    context_length: 1024
+    batch_size: 4
+    epochs: 1
+    grad_clip: 1.0
+    warmup_steps: 400
+    accumulation_steps: 8
+    optimizer:
+      name: adamw
+      learning_rate: 5e-4
 
-sft:
-  dataset: datasets/alpaca
-  context_length: 1024
-  batch_size: 4
-  epochs: 2
-  grad_clip: 1.0
-  warmup_steps: 100
-  accumulation_steps: 8
-  optimizer:
-    name: lion
-    learning_rate: 1e-4
-    weight_decay: 0.01
+  sft:
+    dataset: datasets/alpaca
+    context_length: 1024
+    batch_size: 4
+    epochs: 2
+    grad_clip: 1.0
+    warmup_steps: 100
+    accumulation_steps: 8
+    optimizer:
+      name: adamw
+      learning_rate: 5e-4
 
-dpo:
-  dataset: datasets/magpielm-dpo-data-v0.1
-  context_length: 1024
-  batch_size: 4
-  epochs: 2
-  grad_clip: 1.0
-  warmup_steps: 100
-  accumulation_steps: 8
-  optimizer:
-    name: lion
-    learning_rate: 1.0e-08
-    weight_decay: 0.01
+  dpo:
+    dataset: datasets/magpielm-dpo-data-v0.1
+    context_length: 1024
+    batch_size: 4
+    epochs: 2
+    grad_clip: 1.0
+    warmup_steps: 100
+    accumulation_steps: 8
+    optimizer:
+      name: adamw
+      learning_rate: 1.0e-08
