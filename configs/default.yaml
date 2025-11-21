@@ -25,9 +25,7 @@ model:
 
 train:
   pretrain:
-    dataset:
-      name: datasets/pile
-      ratio: 0.1
+    dataset: datasets/pile
     context_length: 1024
     batch_size: 4
     epochs: 1

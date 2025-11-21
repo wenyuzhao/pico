@@ -2,8 +2,8 @@ import: default.yaml
 
 override:
   train.pretrain.dataset:
-    name: vblagoje/cc_news
-    ratio: 0.5
+    path: vblagoje/cc_news
+    split: "train[:50%]"
   train.pretrain.context_length: 512
   train.pretrain.batch_size: 16
 

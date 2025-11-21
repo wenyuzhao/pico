@@ -6,3 +6,10 @@ model:
   num_attention_heads: 8
   num_kv_attention_heads: 2
   feed_forward_size: 1700
+
+train:
+  pretrain:
+    dataset:
+      path: datasets/fineweb-10bt
+      split: "train[:10%]"
+    

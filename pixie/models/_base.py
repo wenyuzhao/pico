@@ -75,10 +75,11 @@ class ModelConfig(BaseModel):
 
 
 class DatasetConfig(BaseModel):
-    name: str
-    ratio: float | None = None
+    path: str
+    split: str | None = None
+    name: str | None = None
     data_dir: str | None = None
-    data_files: list[str] | None = None
+    data_files: list[str] | dict[str, list[str] | str] | None = None
 
 
 class AdamWOptimizerConfig(BaseModel):

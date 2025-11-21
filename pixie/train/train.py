@@ -56,16 +56,15 @@ def _load_dataset(
     if isinstance(dataset_config, str):
         path = Path(dataset_config)
         if path.is_file():
-            ds = DatasetConfig(name=str(path.parent), data_files=[str(path.name)])
+            ds = DatasetConfig(path=str(path.parent), data_files=[str(path.name)])
         else:
-            ds = DatasetConfig(name=dataset_config)
+            ds = DatasetConfig(path=dataset_config)
     else:
         ds = dataset_config
     dataset = load_dataset(
-        ds.name,
-        split=(
-            f"train[:{round(ds.ratio * 100)}%]" if ds.ratio is not None else "train"
-        ),
+        path=ds.path,
+        name=ds.name,
+        split=ds.split,
         data_dir=ds.data_dir,
         data_files=ds.data_files,
     )
