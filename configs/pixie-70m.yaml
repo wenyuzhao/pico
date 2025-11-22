@@ -11,5 +11,4 @@ train:
   pretrain:
     dataset:
       path: datasets/fineweb-10bt
-      split: "train[:10%]"
-    
+      ratio: 0.01
