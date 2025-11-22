@@ -1,0 +1,12 @@
+import: default.yaml
+
+model:
+  rope_scaling:
+    original_max_position_embeddings: 512
+
+train:
+  pretrain:
+    dataset: datasets/minimind/pretrain_hq.jsonl
+    context_length: 512
+    batch_size: 16
+    warmup_steps: 100
