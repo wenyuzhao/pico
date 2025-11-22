@@ -158,6 +158,7 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool):
     runid, save_dir = _create_runid_and_path(config, "pretrain", tokenizer, dry_run)
     # prepare dataset
     args = config.train["pretrain"]
+    assert args is not None
     dataset = _load_dataset(args.dataset, pretrain.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
     # count tokens
@@ -183,6 +184,7 @@ def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, key="s
     runid, save_dir = _create_runid_and_path(config, key, tokenizer, dry_run)
     # prepare dataset
     args = config.train[key]
+    assert args is not None
     dataset = _load_dataset(args.dataset, sft.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
     # count tokens
@@ -213,6 +215,7 @@ def train_dpo(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
     runid, save_dir = _create_runid_and_path(config, "dpo", tokenizer, dry_run)
     # prepare dataset
     args = config.train["dpo"]
+    assert args is not None
     dataset = _load_dataset(args.dataset, dpo.preprocess, config, tokenizer)
     # dataset = dataset.take(100)
     training_args = _get_trainning_args(args, save_dir, use_wandb)

@@ -29,7 +29,9 @@ def _get_conversations(
 def _process_batch_impl(
     samples: list[list[Message]], config: Config, tok: PreTrainedTokenizerFast
 ) -> dict[str, torch.Tensor]:
-    max_length = config.train["dpo"].context_length
+    args = config.train["dpo"]
+    assert args is not None
+    max_length = args.context_length
     r = tok.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),
         tokenize=True,
