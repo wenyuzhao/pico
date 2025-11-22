@@ -66,13 +66,14 @@ def sft(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
     wandb: bool = False,
     dry_run: bool = False,
+    config: str | None = None,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
-    config = utils.load_config(ckpt / "config.yaml")
-    assert "sft" in config.train, "SFT configuration is missing."
-    train_sft(config, ckpt, use_wandb=wandb, dry_run=dry_run, key="sft")
+    cfg = utils.load_config(config or (ckpt / "config.yaml"))
+    assert "sft" in cfg.train, "SFT configuration is missing."
+    train_sft(cfg, ckpt, use_wandb=wandb, dry_run=dry_run, key="sft")
 
 
 @train_app.command()
@@ -80,13 +81,14 @@ def dpo(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
     wandb: bool = False,
     dry_run: bool = False,
+    config: str | None = None,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
-    config = utils.load_config(ckpt / "config.yaml")
-    assert "dpo" in config.train, "DPO configuration is missing."
-    train_dpo(config, ckpt, use_wandb=wandb, dry_run=dry_run)
+    cfg = utils.load_config(config or (ckpt / "config.yaml"))
+    assert "dpo" in cfg.train, "DPO configuration is missing."
+    train_dpo(cfg, ckpt, use_wandb=wandb, dry_run=dry_run)
 
 
 @train_app.command()
@@ -94,13 +96,14 @@ def reason(
     ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
     wandb: bool = False,
     dry_run: bool = False,
+    config: str | None = None,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
-    config = utils.load_config(ckpt / "config.yaml")
-    assert "reason" in config.train, "Reason configuration is missing."
-    train_sft(config, ckpt, use_wandb=wandb, dry_run=dry_run, key="reason")
+    cfg = utils.load_config(config or (ckpt / "config.yaml"))
+    assert "reason" in cfg.train, "Reason configuration is missing."
+    train_sft(cfg, ckpt, use_wandb=wandb, dry_run=dry_run, key="reason")
 
 
 app.add_typer(train_app, name="train", help="Training related commands.")
