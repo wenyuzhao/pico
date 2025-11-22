@@ -3,7 +3,6 @@ from pixie.models._base import Config
 import torch
 from typing import cast, TypedDict
 from transformers import PreTrainedTokenizerFast
-from pixie.train import CHAT_TEMPLATES
 from .pretrain import PretrainTrainer
 
 
@@ -67,15 +66,20 @@ def _get_conversations(data: dict[str, Any]) -> list[list[dict[str, str]]]:
 def preprocess(
     data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
 ) -> dict[str, torch.Tensor]:
-    max_length = config.train["sft"].context_length
+    args = config.train["sft"]
+    assert args is not None
+    max_length = args.context_length
     samples = _get_conversations(data)
+    assert tokenizer.chat_template
+    assert (
+        "endgeneration" in tokenizer.chat_template
+    ), "chat template does not contain `{% generation %}` keyword."
     tokens = tokenizer.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),
         tokenize=True,
         # add_generation_prompt=True,
         return_assistant_tokens_mask=True,
         return_dict=True,
-        chat_template=CHAT_TEMPLATES.get(config.model.tokenizer, None),
         max_length=max_length,
         padding="max_length",
         truncation=True,

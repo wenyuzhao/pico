@@ -1,7 +1,7 @@
 from pathlib import Path
 import os, time
 import torch
-from transformers import TrainingArguments
+from transformers import AutoTokenizer, TrainingArguments
 from datasets import load_dataset, Dataset
 from pixie import utils
 from pixie.models._base import (
@@ -43,7 +43,7 @@ def _create_runid_and_path(
     if not dry_run:
         path.mkdir(parents=True, exist_ok=True)
         utils.save_config(config, path / "config.yaml")
-        tokenizer.save_pretrained(path, save_jinja_files=False)
+        tokenizer.save_pretrained(path, save_jinja_files=True)
     return runid, str(path)
 
 
@@ -180,7 +180,7 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool):
 
 def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, key="sft"):
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
-    tokenizer = config.model.load_tokenizer()
+    tokenizer = AutoTokenizer.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
     runid, save_dir = _create_runid_and_path(config, key, tokenizer, dry_run)
     # prepare dataset
@@ -210,7 +210,7 @@ def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, key="s
 
 def train_dpo(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
-    tokenizer = config.model.load_tokenizer()
+    tokenizer = AutoTokenizer.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
     ref_model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     runid, save_dir = _create_runid_and_path(config, "dpo", tokenizer, dry_run)

@@ -1,0 +1,15 @@
+import: default.yaml
+
+train:
+  pretrain:
+    dataset:
+      path: datasets/fineweb-10bt
+      ratio: 0.02
+    context_length: 1024
+    batch_size: 6
+
+  sft:
+    dataset:
+      path: HuggingFaceH4/ultrachat_200k
+    context_length: 1024
+    batch_size: 6

@@ -1,6 +1,6 @@
 model:
   name: pixie
-  tokenizer: LiquidAI/LFM2-350M
+  tokenizer: configs/tokenizers/lfm2
   hidden_size: 512
   num_hidden_layers: 8
   hidden_act: silu
@@ -25,16 +25,10 @@ model:
 
 train:
   pretrain:
-    dataset: datasets/pile
+    dataset:
+      path: datasets/fineweb-10bt
     context_length: 1024
-    batch_size: 4
-    epochs: 1
-    grad_clip: 1.0
-    warmup_steps: 400
-    accumulation_steps: 8
-    optimizer:
-      name: adamw
-      learning_rate: 5e-4
+    batch_size: 6
 
   sft:
     dataset: datasets/alpaca

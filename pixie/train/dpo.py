@@ -6,7 +6,6 @@ from typing import cast, TypedDict
 from transformers import PreTrainedTokenizerFast
 from torch import nn
 from transformers import Trainer
-from pixie.train import CHAT_TEMPLATES
 
 
 class Message(TypedDict):
@@ -32,13 +31,16 @@ def _process_batch_impl(
     args = config.train["dpo"]
     assert args is not None
     max_length = args.context_length
+    assert tok.chat_template
+    assert (
+        "endgeneration" in tok.chat_template
+    ), "chat template does not contain `{% generation %}` keyword."
     r = tok.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),
         tokenize=True,
         # add_generation_prompt=True,
         return_assistant_tokens_mask=True,
         return_dict=True,
-        chat_template=CHAT_TEMPLATES.get(tok.name_or_path, ""),
         max_length=max_length,
         padding="max_length",
         truncation=True,

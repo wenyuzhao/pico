@@ -1,6 +1,6 @@
 model:
   name: pixie
-  tokenizer: jingyaogong/MiniMind2
+  tokenizer: configs/tokenizers/minimind2
   hidden_size: 512
   num_hidden_layers: 8
   hidden_act: silu
