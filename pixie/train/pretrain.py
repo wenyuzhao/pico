@@ -52,7 +52,6 @@ class PretrainTrainer(Trainer):
             loss_mask[think_token_pos] = 10
             loss_mask = loss_mask.view(Y.size())
         loss = (loss * loss_mask).sum() / loss_mask.sum()
-        loss = loss / self.args.gradient_accumulation_steps
         return loss
 
     def compute_loss(
