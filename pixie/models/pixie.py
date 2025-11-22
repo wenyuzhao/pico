@@ -115,11 +115,11 @@ class MultiHeadAttention(nn.Module):
         # Apply scaled dot-product attention
         dropout_p = self.dropout if self.training else 0.0
         if past_key_values is not None:
-            attn_bias = causal_lower_right(seq_len, k.shape[2])
+            attn_mask = causal_lower_right(seq_len, k.shape[2])
             is_causal = False
         else:
-            attn_bias = None
-            is_causal = False
+            attn_mask = None
+            is_causal = True
         output = F.scaled_dot_product_attention(
             q,
             k,
@@ -127,7 +127,7 @@ class MultiHeadAttention(nn.Module):
             dropout_p=dropout_p,
             is_causal=is_causal,
             enable_gqa=self.kv_rep > 1,
-            attn_mask=attn_bias,
+            attn_mask=attn_mask,
         )
         assert output.shape == (
             batch_size,

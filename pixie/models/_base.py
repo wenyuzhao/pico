@@ -80,6 +80,7 @@ class DatasetConfig(BaseModel):
     name: str | None = None
     data_dir: str | None = None
     data_files: list[str] | dict[str, list[str] | str] | None = None
+    ratio: float | None = None
 
 
 class AdamWOptimizerConfig(BaseModel):
@@ -121,7 +122,7 @@ class TrainingConfig(BaseModel):
 class Config(BaseModel):
     name: str | None = None
     model: ModelConfig
-    train: dict[str, TrainingConfig] = Field(default_factory=dict)
+    train: dict[str, TrainingConfig | None] = Field(default_factory=dict)
 
 
 class BaseCasualLM[C: ModelConfig](PreTrainedModel, GenerationMixin):

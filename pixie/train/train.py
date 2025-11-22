@@ -64,12 +64,18 @@ def _load_dataset(
     dataset = load_dataset(
         path=ds.path,
         name=ds.name,
-        split=ds.split,
+        split=ds.split or "train",
         data_dir=ds.data_dir,
         data_files=ds.data_files,
     )
-    assert isinstance(dataset, Dataset)
-    dataset = dataset.shuffle(seed=42).map(
+    assert isinstance(dataset, Dataset), f"{type(dataset)}"
+    dataset = dataset.shuffle(seed=42)
+    if ds.ratio is not None:
+        assert 0.0 < ds.ratio and ds.ratio <= 1.0
+        total_size = len(dataset)
+        new_size = int(total_size * ds.ratio)
+        dataset = dataset.select(range(new_size))
+    dataset = dataset.map(
         preprocess_fn,
         remove_columns=dataset.column_names,
         batched=True,
