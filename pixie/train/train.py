@@ -18,12 +18,16 @@ from transformers import PreTrainedTokenizerBase
 
 
 def _create_runid_and_path(
-    config: Config, type: str, tokenizer: PreTrainedTokenizerBase, dry_run: bool
+    config: Config,
+    type: str,
+    tokenizer: PreTrainedTokenizerBase,
+    dry_run: bool,
+    project: str | None,
 ) -> tuple[str, str]:
     assert config.name
-    runid = config.name
-    # if project is not None:
-    #     self.runid += "-" + slugify(project)
+    runid = config.name + "-" + type
+    if project:
+        runid += "-" + project
     # get git branch name
     # try:
     #     repo = git.Repo(search_parent_directories=True)
@@ -35,7 +39,7 @@ def _create_runid_and_path(
     runid += "-" + time.strftime("%Y%m%d-%H%M%S")
     print(f"Run ID: {runid}")
     os.environ["WANDB_PROJECT"] = f"{config.name}"
-    os.environ["WANDB_NAME"] = type + "-" + runid
+    os.environ["WANDB_NAME"] = runid
     if dry_run:
         path = Path("out/scratch")
     else:
@@ -153,10 +157,12 @@ def _count_tokens(dataset: Dataset) -> int:
     return total_tokens
 
 
-def train_pretrain(config: Config, use_wandb: bool, dry_run: bool):
+def train_pretrain(config: Config, use_wandb: bool, dry_run: bool, project: str | None):
     model = utils.load_model(config.model)
     tokenizer = config.model.load_tokenizer()
-    runid, save_dir = _create_runid_and_path(config, "pretrain", tokenizer, dry_run)
+    runid, save_dir = _create_runid_and_path(
+        config, "pretrain", tokenizer, dry_run, project
+    )
     # prepare dataset
     args = config.train["pretrain"]
     assert args is not None
@@ -178,11 +184,18 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool):
         trainer.save_model(save_dir)
 
 
-def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, key="sft"):
+def train_sft(
+    config: Config,
+    ckpt: Path,
+    use_wandb: bool,
+    dry_run: bool,
+    project: str | None,
+    key="sft",
+):
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
-    runid, save_dir = _create_runid_and_path(config, key, tokenizer, dry_run)
+    runid, save_dir = _create_runid_and_path(config, key, tokenizer, dry_run, project)
     # prepare dataset
     args = config.train[key]
     assert args is not None
@@ -208,12 +221,14 @@ def train_sft(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, key="s
     trainer.save_model(save_dir)
 
 
-def train_dpo(config: Config, ckpt: Path, use_wandb: bool, dry_run: bool):
+def train_dpo(
+    config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, project: str | None
+):
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
     ref_model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
-    runid, save_dir = _create_runid_and_path(config, "dpo", tokenizer, dry_run)
+    runid, save_dir = _create_runid_and_path(config, "dpo", tokenizer, dry_run, project)
     # prepare dataset
     args = config.train["dpo"]
     assert args is not None

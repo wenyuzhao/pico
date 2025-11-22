@@ -53,57 +53,63 @@ def pretrain(
     config_name: str,
     wandb: bool = False,
     dry_run: bool = False,
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     config = utils.load_config(f"configs/{config_name}.yaml")
     assert "pretrain" in config.train, "Pretrain configuration is missing."
-    train_pretrain(config, use_wandb=wandb, dry_run=dry_run)
+    train_pretrain(config, use_wandb=wandb, dry_run=dry_run, project=project)
 
 
 @train_app.command()
 def sft(
-    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
+    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt", "-c")],
     wandb: bool = False,
     dry_run: bool = False,
     config: str | None = None,
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
     cfg = utils.load_config(config or (ckpt / "config.yaml"))
     assert "sft" in cfg.train, "SFT configuration is missing."
-    train_sft(cfg, ckpt, use_wandb=wandb, dry_run=dry_run, key="sft")
+    train_sft(cfg, ckpt, use_wandb=wandb, dry_run=dry_run, key="sft", project=project)
 
 
 @train_app.command()
 def dpo(
-    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
+    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt", "-c")],
     wandb: bool = False,
     dry_run: bool = False,
     config: str | None = None,
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
     cfg = utils.load_config(config or (ckpt / "config.yaml"))
     assert "dpo" in cfg.train, "DPO configuration is missing."
-    train_dpo(cfg, ckpt, use_wandb=wandb, dry_run=dry_run)
+    train_dpo(cfg, ckpt, use_wandb=wandb, dry_run=dry_run, project=project)
 
 
 @train_app.command()
 def reason(
-    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt")],
+    ckpt: Annotated[Path, typer.Option("--checkpoint", "--ckpt", "-c")],
     wandb: bool = False,
     dry_run: bool = False,
     config: str | None = None,
+    project: Annotated[str | None, typer.Option("--project", "-p")] = None,
 ):
     dotenv.load_dotenv()
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     assert ckpt.is_dir()
     cfg = utils.load_config(config or (ckpt / "config.yaml"))
     assert "reason" in cfg.train, "Reason configuration is missing."
-    train_sft(cfg, ckpt, use_wandb=wandb, dry_run=dry_run, key="reason")
+    train_sft(
+        cfg, ckpt, use_wandb=wandb, dry_run=dry_run, key="reason", project=project
+    )
 
 
 app.add_typer(train_app, name="train", help="Training related commands.")
