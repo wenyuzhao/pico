@@ -9,7 +9,6 @@ train:
     batch_size: 6
 
   sft:
-    dataset:
-      path: HuggingFaceH4/ultrachat_200k
+    dataset: teknium/OpenHermes-2.5
     context_length: 1024
     batch_size: 6
