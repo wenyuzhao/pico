@@ -1,6 +1,6 @@
 from pathlib import Path
 import os, time
-from torch import Tensor
+import torch
 from transformers import TrainingArguments
 from datasets import load_dataset, Dataset
 from pixie import utils
@@ -89,6 +89,7 @@ def _load_dataset(
 def _get_trainning_args(
     args: TrainingConfig, model_save_dir: str, use_wandb: bool
 ) -> TrainingArguments:
+    torch.manual_seed(42)
     # assert isinstance(args.optimizer, AdamWOptimizerConfig)
     optim: AdamWOptimizerConfig | LionOptimizerConfig = (
         args.optimizer

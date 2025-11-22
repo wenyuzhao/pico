@@ -37,7 +37,7 @@ class ModelConfig(BaseModel):
     num_attention_heads: int
     num_kv_attention_heads: int
     dropout: float
-    feed_forward_size: int
+    feed_forward_size: int | None = None
     max_position_embeddings: int
     rope_theta: float
     rope_scaling: RopeScaling | None = None
