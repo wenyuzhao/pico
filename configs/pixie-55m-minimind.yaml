@@ -10,3 +10,4 @@ train:
     context_length: 512
     batch_size: 16
     warmup_steps: 100
+    accumulation_steps: 4

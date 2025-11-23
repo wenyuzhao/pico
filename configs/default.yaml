@@ -29,6 +29,7 @@ train:
       path: datasets/fineweb-10bt
     context_length: 1024
     batch_size: 6
+    accumulation_steps: 8
 
   sft:
     dataset: datasets/alpaca
