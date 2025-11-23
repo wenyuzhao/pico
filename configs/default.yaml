@@ -29,15 +29,18 @@ train:
       path: datasets/fineweb-10bt
     context_length: 1024
     batch_size: 6
+    epochs: 1
+    grad_clip: 1.0
+    warmup_steps: 400
     accumulation_steps: 8
 
   sft:
-    dataset: datasets/alpaca
+    dataset: teknium/OpenHermes-2.5
     context_length: 1024
-    batch_size: 4
+    batch_size: 6
     epochs: 2
     grad_clip: 1.0
-    warmup_steps: 100
+    warmup_steps: 400
     accumulation_steps: 8
     optimizer:
       name: adamw
@@ -46,10 +49,10 @@ train:
   dpo:
     dataset: datasets/magpielm-dpo-data-v0.1
     context_length: 1024
-    batch_size: 4
+    batch_size: 6
     epochs: 2
     grad_clip: 1.0
-    warmup_steps: 100
+    warmup_steps: 400
     accumulation_steps: 8
     optimizer:
       name: adamw
