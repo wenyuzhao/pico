@@ -21,7 +21,7 @@ model:
 train:
   pretrain:
     dataset: datasets/minimind/pretrain_hq.jsonl
-    context_length: 512
+    max_length: 512
     batch_size: 64
     epochs: 1
     grad_clip: 1.0
@@ -33,7 +33,7 @@ train:
 
   sft:
     dataset: datasets/minimind/sft_mini_512.jsonl
-    context_length: 512
+    max_length: 512
     batch_size: 64
     epochs: 2
     grad_clip: 1.0
@@ -45,7 +45,7 @@ train:
 
   reason:
     dataset: jingyaogong/minimind_dataset/r1_mix_1024.jsonl
-    context_length: 1024
+    max_length: 1024
     batch_size: 16
     epochs: 2
     grad_clip: 1.0
@@ -57,7 +57,7 @@ train:
 
   dpo:
     dataset: datasets/minimind/dpo.jsonl
-    context_length: 1024
+    max_length: 1024
     batch_size: 12
     epochs: 2
     grad_clip: 1.0

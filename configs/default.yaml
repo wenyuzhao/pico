@@ -26,7 +26,7 @@ model:
 train:
   pretrain:
     dataset: datasets/fineweb-10bt
-    context_length: 1024
+    max_length: 1024
     batch_size: 6
     epochs: 1
     grad_clip: 1.0
@@ -38,7 +38,7 @@ train:
 
   sft:
     dataset: teknium/OpenHermes-2.5
-    context_length: 1024
+    max_length: 1024
     batch_size: 6
     epochs: 2
     grad_clip: 1.0
@@ -50,7 +50,7 @@ train:
 
   dpo:
     dataset: datasets/magpielm-dpo-data-v0.1
-    context_length: 1024
+    max_length: 1024
     batch_size: 6
     epochs: 2
     grad_clip: 1.0

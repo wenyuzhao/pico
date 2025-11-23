@@ -4,7 +4,7 @@ override:
   train.pretrain.dataset:
     path: vblagoje/cc_news
     ratio: 0.5
-  train.pretrain.context_length: 512
+  train.pretrain.max_length: 512
   train.pretrain.batch_size: 16
 
 train:
