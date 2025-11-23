@@ -1,0 +1,17 @@
+import: default.yaml
+
+model:
+  generation:
+    max_length: 2048
+
+train:
+  pretrain:
+    dataset: datasets/fineweb-10bt
+
+  sft:
+    dataset:
+      datasets:
+        - datasets/openhermes-2.5
+        - datasets/identity/pico
+        - path: datasets/ultrachat_200k
+          split: train_gen+train_sft

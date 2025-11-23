@@ -125,11 +125,16 @@ def _load_dataset(
             force_no_shuffle=no_shuffle,
         )
         datasets.append(ds)
-    ds = interleave_datasets(
-        datasets,
-        probabilities=dataset_config.probabilities,
-        seed=SEED,
-    )
+    if dataset_config.probabilities:
+        ds = interleave_datasets(
+            datasets,
+            probabilities=dataset_config.probabilities,
+            seed=SEED,
+        )
+    else:
+        ds = interleave_datasets(
+            datasets, seed=SEED, stopping_strategy="all_exhausted_without_replacement"
+        )
     if dataset_config.shuffle:
         ds = ds.shuffle(seed=SEED)
     if dataset_config.ratio is not None:

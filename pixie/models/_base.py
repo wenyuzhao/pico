@@ -87,7 +87,7 @@ class DatasetConfig(BaseModel):
 
 
 class MixedDatasets(BaseModel):
-    probabilities: list[float]
+    probabilities: list[float] | None = None
     shuffle: bool = True
     ratio: float | None = None
     """The ratio of the dataset to use, after shuffling."""
@@ -121,8 +121,8 @@ class TrainingConfig(BaseModel):
 
     epochs: int = 1
     grad_clip: float = 1.0
-    warmup_steps: int | None = 400
-    accumulation_steps: int = 8
+    warmup_steps: int = 0
+    accumulation_steps: int = 1
     gradient_checkpointing: bool = False
     optimizer: OptimizerConfig | Literal["adamw", "lion"] = "adamw"
     think_tokens: list[str] | None = None
