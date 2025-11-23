@@ -80,7 +80,18 @@ class DatasetConfig(BaseModel):
     name: str | None = None
     data_dir: str | None = None
     data_files: list[str] | dict[str, list[str] | str] | None = None
+    shuffle: bool = True
     ratio: float | None = None
+    """The ratio of the dataset to use, after shuffling."""
+    max_length: int | None = None
+
+
+class MixedDatasets(BaseModel):
+    probabilities: list[float]
+    shuffle: bool = True
+    ratio: float | None = None
+    """The ratio of the dataset to use, after shuffling."""
+    datasets: list[str | DatasetConfig]
 
 
 class AdamWOptimizerConfig(BaseModel):
@@ -104,8 +115,8 @@ type OptimizerConfig = Annotated[
 
 
 class TrainingConfig(BaseModel):
-    dataset: str | DatasetConfig
-    context_length: int
+    dataset: str | DatasetConfig | MixedDatasets
+    max_length: int
     batch_size: int | Literal["auto"]
 
     epochs: int = 1

@@ -64,16 +64,9 @@ def _get_conversations(data: dict[str, Any]) -> list[list[dict[str, str]]]:
 
 
 def preprocess(
-    data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
+    data: dict[str, Any], tokenizer: PreTrainedTokenizerFast, max_length: int
 ) -> dict[str, torch.Tensor]:
-    args = config.train["sft"]
-    assert args is not None
-    max_length = args.context_length
     samples = _get_conversations(data)
-    assert tokenizer.chat_template
-    assert (
-        "endgeneration" in tokenizer.chat_template
-    ), "chat template does not contain `{% generation %}` keyword."
     tokens = tokenizer.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),
         tokenize=True,

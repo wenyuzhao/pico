@@ -9,11 +9,8 @@ from transformers import Trainer
 
 
 def preprocess(
-    data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
+    data: dict[str, Any], tokenizer: PreTrainedTokenizerFast, max_length: int
 ) -> dict[str, Tensor]:
-    args = config.train["pretrain"]
-    assert args is not None
-    max_length = args.context_length
     possible_text_columns = ["text", "content"]
     col_name: str | None = None
     for col in possible_text_columns:

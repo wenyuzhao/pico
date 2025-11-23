@@ -2,12 +2,13 @@ from pathlib import Path
 import os, time
 import torch
 from transformers import AutoTokenizer, TrainingArguments
-from datasets import load_dataset, Dataset
+from datasets import load_dataset, Dataset, interleave_datasets
 from pixie import utils
 from pixie.models._base import (
     AdamWOptimizerConfig,
     LionOptimizerConfig,
     DatasetConfig,
+    MixedDatasets,
     Config,
     TrainingConfig,
 )
@@ -15,6 +16,10 @@ from pixie.train import pretrain, sft, dpo
 from typing import Any
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers import PreTrainedTokenizerBase
+import os
+
+SEED = 42
+ENABLE_DATASET_CACHE = os.environ.get("DATASET_CACHE", "1").lower() in ("1", "true")
 
 
 def _create_runid_and_path(
@@ -51,11 +56,12 @@ def _create_runid_and_path(
     return runid, str(path)
 
 
-def _load_dataset(
-    dataset_config: DatasetConfig | str,
+def _load_one_dataset(
+    dataset_config: str | DatasetConfig,
     preprocess_fn: Any,
-    config: Config,
     tokenizer: Any,
+    max_length: int,
+    force_no_shuffle: bool = False,
 ) -> Dataset:
     if isinstance(dataset_config, str):
         path = Path(dataset_config)
@@ -65,6 +71,7 @@ def _load_dataset(
             ds = DatasetConfig(path=dataset_config)
     else:
         ds = dataset_config
+    max_length = ds.max_length or max_length
     dataset = load_dataset(
         path=ds.path,
         name=ds.name,
@@ -73,7 +80,8 @@ def _load_dataset(
         data_files=ds.data_files,
     )
     assert isinstance(dataset, Dataset), f"{type(dataset)}"
-    dataset = dataset.shuffle(seed=42)
+    if ds.shuffle and not force_no_shuffle:
+        dataset = dataset.shuffle(seed=SEED)
     if ds.ratio is not None:
         assert 0.0 < ds.ratio and ds.ratio <= 1.0
         total_size = len(dataset)
@@ -84,17 +92,57 @@ def _load_dataset(
         remove_columns=dataset.column_names,
         batched=True,
         num_proc=os.cpu_count(),
-        fn_kwargs={"config": config, "tokenizer": tokenizer},
-        # load_from_cache_file=False,
+        fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
+        load_from_cache_file=ENABLE_DATASET_CACHE,
     )
     return dataset
 
 
-def _get_trainning_args(
+def _load_dataset(
+    dataset_config: str | DatasetConfig | MixedDatasets,
+    preprocess_fn: Any,
+    tokenizer: Any,
+    max_length: int,
+    is_pretrain: bool = False,
+) -> Dataset:
+    if not is_pretrain:
+        assert tokenizer.chat_template
+        assert (
+            "endgeneration" in tokenizer.chat_template
+        ), "chat template does not contain `{% generation %}` keyword."
+    # Single dataset
+    if not isinstance(dataset_config, MixedDatasets):
+        return _load_one_dataset(dataset_config, preprocess_fn, tokenizer, max_length)
+    # Mixed dataset
+    datasets: list[Dataset] = []
+    for ds_cfg in dataset_config.datasets:
+        no_shuffle = isinstance(ds_cfg, str) or ds_cfg.ratio is None
+        ds = _load_one_dataset(
+            ds_cfg,
+            preprocess_fn,
+            tokenizer,
+            max_length,
+            force_no_shuffle=no_shuffle,
+        )
+        datasets.append(ds)
+    ds = interleave_datasets(
+        datasets,
+        probabilities=dataset_config.probabilities,
+        seed=SEED,
+    )
+    if dataset_config.shuffle:
+        ds = ds.shuffle(seed=SEED)
+    if dataset_config.ratio is not None:
+        assert 0.0 < dataset_config.ratio and dataset_config.ratio <= 1.0
+        total_size = len(ds)
+        new_size = int(total_size * dataset_config.ratio)
+        ds = ds.select(range(new_size))
+    return ds
+
+
+def _get_training_args(
     args: TrainingConfig, model_save_dir: str, use_wandb: bool
 ) -> TrainingArguments:
-    torch.manual_seed(42)
-    # assert isinstance(args.optimizer, AdamWOptimizerConfig)
     optim: AdamWOptimizerConfig | LionOptimizerConfig = (
         args.optimizer
         if isinstance(args.optimizer, (AdamWOptimizerConfig, LionOptimizerConfig))
@@ -105,12 +153,10 @@ def _get_trainning_args(
         )
     )
     if isinstance(optim, AdamWOptimizerConfig):
-        learning_rate = optim.learning_rate
         betas = optim.betas
         eps = optim.eps
         weight_decay = optim.weight_decay
     else:
-        learning_rate = optim.learning_rate
         betas = optim.betas
         eps = None
         weight_decay = optim.weight_decay
@@ -158,6 +204,7 @@ def _count_tokens(dataset: Dataset) -> int:
 
 
 def train_pretrain(config: Config, use_wandb: bool, dry_run: bool, project: str | None):
+    torch.manual_seed(SEED)
     model = utils.load_model(config.model)
     tokenizer = config.model.load_tokenizer()
     runid, save_dir = _create_runid_and_path(
@@ -166,13 +213,19 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool, project: str 
     # prepare dataset
     args = config.train["pretrain"]
     assert args is not None
-    dataset = _load_dataset(args.dataset, pretrain.preprocess, config, tokenizer)
+    dataset = _load_dataset(
+        dataset_config=args.dataset,
+        preprocess_fn=pretrain.preprocess,
+        tokenizer=tokenizer,
+        max_length=args.max_length,
+        is_pretrain=True,
+    )
     # dataset = dataset.take(100)
     # count tokens
     tokens = _count_tokens(dataset)
     billion_tokens = tokens / 1_000_000_000
     print(f"Total tokens in dataset: {tokens} ({billion_tokens:.2f}B)")
-    training_args = _get_trainning_args(args, save_dir, use_wandb)
+    training_args = _get_training_args(args, save_dir, use_wandb)
     training_args.label_names = ["loss_mask"]
     trainer = pretrain.PretrainTrainer(
         model=model,
@@ -192,6 +245,7 @@ def train_sft(
     project: str | None,
     key="sft",
 ):
+    torch.manual_seed(SEED)
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
@@ -199,13 +253,18 @@ def train_sft(
     # prepare dataset
     args = config.train[key]
     assert args is not None
-    dataset = _load_dataset(args.dataset, sft.preprocess, config, tokenizer)
+    dataset = _load_dataset(
+        dataset_config=args.dataset,
+        preprocess_fn=sft.preprocess,
+        tokenizer=tokenizer,
+        max_length=args.max_length,
+    )
     # dataset = dataset.take(100)
     # count tokens
     tokens = _count_tokens(dataset)
     billion_tokens = tokens / 1_000_000_000
     print(f"Total tokens in dataset: {tokens} ({billion_tokens:.2f}B)")
-    training_args = _get_trainning_args(args, save_dir, use_wandb)
+    training_args = _get_training_args(args, save_dir, use_wandb)
     training_args.label_names = ["loss_mask"]
     trainer = sft.SFTTrainer(
         model=model,
@@ -224,6 +283,7 @@ def train_sft(
 def train_dpo(
     config: Config, ckpt: Path, use_wandb: bool, dry_run: bool, project: str | None
 ):
+    torch.manual_seed(SEED)
     model = AutoModelForCausalLM.from_pretrained(ckpt, trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(ckpt, trust_remote_code=True)
     print(f"Loaded checkpoint from {ckpt}")
@@ -232,9 +292,14 @@ def train_dpo(
     # prepare dataset
     args = config.train["dpo"]
     assert args is not None
-    dataset = _load_dataset(args.dataset, dpo.preprocess, config, tokenizer)
+    dataset = _load_dataset(
+        dataset_config=args.dataset,
+        preprocess_fn=dpo.preprocess,
+        tokenizer=tokenizer,
+        max_length=args.max_length,
+    )
     # dataset = dataset.take(100)
-    training_args = _get_trainning_args(args, save_dir, use_wandb)
+    training_args = _get_training_args(args, save_dir, use_wandb)
     training_args.label_names = [
         "rejected_loss_mask",
         "chosen_loss_mask",

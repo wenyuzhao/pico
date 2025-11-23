@@ -26,15 +26,8 @@ def _get_conversations(
 
 
 def _process_batch_impl(
-    samples: list[list[Message]], config: Config, tok: PreTrainedTokenizerFast
+    samples: list[list[Message]], tok: PreTrainedTokenizerFast, max_length: int
 ) -> dict[str, torch.Tensor]:
-    args = config.train["dpo"]
-    assert args is not None
-    max_length = args.context_length
-    assert tok.chat_template
-    assert (
-        "endgeneration" in tok.chat_template
-    ), "chat template does not contain `{% generation %}` keyword."
     r = tok.apply_chat_template(
         cast(list[list[dict[str, str]]], samples),
         tokenize=True,
@@ -51,12 +44,12 @@ def _process_batch_impl(
 
 
 def preprocess(
-    data: dict[str, Any], config: Config, tokenizer: PreTrainedTokenizerFast
+    data: dict[str, Any], tokenizer: PreTrainedTokenizerFast, max_length: int
 ) -> dict[str, torch.Tensor]:
     chosen, rejected = _get_conversations(data)
     assert len(chosen) == len(rejected)
-    chosen = _process_batch_impl(chosen, config, tokenizer)
-    rejected = _process_batch_impl(rejected, config, tokenizer)
+    chosen = _process_batch_impl(chosen, tokenizer, max_length)
+    rejected = _process_batch_impl(rejected, tokenizer, max_length)
     chosen_input_ids = chosen["input_ids"]
     chosen_loss_mask = chosen["assistant_masks"]
     rejected_input_ids = rejected["input_ids"]
