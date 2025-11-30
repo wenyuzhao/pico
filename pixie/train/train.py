@@ -2,7 +2,7 @@ from pathlib import Path
 import os, time
 import torch
 from transformers import AutoTokenizer, TrainingArguments
-from datasets import load_dataset, Dataset, interleave_datasets
+from datasets import load_dataset, Dataset, interleave_datasets, concatenate_datasets
 from pixie import utils
 from pixie.models._base import (
     AdamWOptimizerConfig,
@@ -132,9 +132,7 @@ def _load_dataset(
             seed=SEED,
         )
     else:
-        ds = interleave_datasets(
-            datasets, seed=SEED, stopping_strategy="all_exhausted_without_replacement"
-        )
+        ds = concatenate_datasets(datasets)
     if dataset_config.shuffle:
         ds = ds.shuffle(seed=SEED)
     if dataset_config.ratio is not None:
