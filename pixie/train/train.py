@@ -1,7 +1,7 @@
 from pathlib import Path
 import os, time
 import torch
-from transformers import AutoTokenizer, TrainingArguments
+from transformers import AutoTokenizer, TrainerControl, TrainerState, TrainingArguments
 from datasets import load_dataset, Dataset, interleave_datasets, concatenate_datasets
 from pixie import utils
 from pixie.models._base import (
@@ -13,9 +13,10 @@ from pixie.models._base import (
     TrainingConfig,
 )
 from pixie.train import pretrain, sft, dpo
-from typing import Any
+from typing import Any, override
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers import PreTrainedTokenizerBase
+from transformers.trainer_callback import TrainerCallback
 import os
 
 SEED = 42
@@ -99,7 +100,7 @@ def _load_one_dataset(
 
 
 def _load_dataset(
-    dataset_config: str | DatasetConfig | MixedDatasets,
+    dataset_config: str | DatasetConfig | MixedDatasets | list[str | DatasetConfig],
     preprocess_fn: Any,
     tokenizer: Any,
     max_length: int,
@@ -111,9 +112,13 @@ def _load_dataset(
             "endgeneration" in tokenizer.chat_template
         ), "chat template does not contain `{% generation %}` keyword."
     # Single dataset
-    if not isinstance(dataset_config, MixedDatasets):
+    if not isinstance(dataset_config, MixedDatasets) and not isinstance(
+        dataset_config, list
+    ):
         return _load_one_dataset(dataset_config, preprocess_fn, tokenizer, max_length)
     # Mixed dataset
+    if isinstance(dataset_config, list):
+        dataset_config = MixedDatasets(datasets=dataset_config)
     datasets: list[Dataset] = []
     for ds_cfg in dataset_config.datasets:
         no_shuffle = isinstance(ds_cfg, str) or ds_cfg.ratio is None
@@ -178,8 +183,8 @@ def _get_training_args(
         max_grad_norm=args.grad_clip,
         warmup_steps=args.warmup_steps or 0,
         num_train_epochs=args.epochs,
-        save_strategy="no",  # "steps",
-        save_steps=5000,
+        save_strategy="no" if not args.save_steps else "steps",
+        save_steps=args.save_steps if args.save_steps else 1000,
         lr_scheduler_type="cosine",
         torch_compile=True,
         torch_compile_mode="default",
@@ -234,6 +239,7 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool, project: str 
         model=model,
         args=training_args,
         train_dataset=dataset,
+        callbacks=[ManualSaveCallback()],
     )
     trainer.train()
     if not dry_run:
@@ -273,6 +279,7 @@ def train_sft(
         model=model,
         args=training_args,
         train_dataset=dataset,
+        callbacks=[ManualSaveCallback()],
     )
     if args.think_tokens:
         tokens = []
@@ -315,6 +322,27 @@ def train_dpo(
         args=training_args,
         train_dataset=dataset,
         beta=args.beta,
+        callbacks=[ManualSaveCallback()],
     )
     trainer.train()
     trainer.save_model(save_dir)
+
+
+class ManualSaveCallback(TrainerCallback):
+    def __init__(self) -> None:
+        super().__init__()
+        self.file = Path(__file__).parent / "SAVE"
+
+    @override
+    def on_step_end(
+        self,
+        args: TrainingArguments,
+        state: TrainerState,
+        control: TrainerControl,
+        **kwargs,
+    ):
+        if not self.file.exists() or not self.file.is_file():
+            return
+        print("Manual save triggered.")
+        control.should_save = True
+        self.file.unlink()

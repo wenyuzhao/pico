@@ -115,9 +115,10 @@ type OptimizerConfig = Annotated[
 
 
 class TrainingConfig(BaseModel):
-    dataset: str | DatasetConfig | MixedDatasets
+    dataset: str | DatasetConfig | MixedDatasets | list[str | DatasetConfig]
     max_length: int
     batch_size: int | Literal["auto"]
+    save_steps: int | None = None
 
     epochs: int = 1
     grad_clip: float = 1.0
