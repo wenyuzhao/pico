@@ -10,8 +10,12 @@ train:
 
   sft:
     dataset:
-      datasets:
-        - datasets/openhermes-2.5
-        - datasets/identity/pico
-        - path: datasets/ultrachat_200k
-          split: train_gen+train_sft
+      # - datasets/openhermes-2.5
+      - datasets/magpie-pro-300k-filtered
+      - datasets/ultrachat_200k
+      - datasets/identity/pico-sft
+
+  dpo:
+    dataset:
+      - datasets/magpielm-dpo-data-v0.1
+      - datasets/identity/pico-dpo
