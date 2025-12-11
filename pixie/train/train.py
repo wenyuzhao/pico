@@ -188,7 +188,7 @@ def _get_training_args(
         # Training args
         do_train=True,
         fp16=True,
-        bf16=False,
+        bf16=os.environ.get("USE_BF16", "0").lower() in ("1", "true"),
         per_device_train_batch_size=(
             args.batch_size if args.batch_size != "auto" else 8
         ),
