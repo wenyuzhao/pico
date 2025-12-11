@@ -1,5 +1,5 @@
-# HF_HOME=/root/.hf_cache uv run pixie train pretrain pico-100m --wandb
-# HF_HOME=/root/.hf_cache uv run pixie train pretrain pico-100m --dry-run
+# uv run pixie train pretrain pico-100m --wandb
+# uv run pixie train pretrain pico-100m --dry-run
 import: default.yaml
 
 model:
@@ -13,6 +13,8 @@ model:
 
 train:
   pretrain:
+    save_steps: 10000
+    batch_size: 16
     dataset: EleutherAI/SmolLM2-135M-20B
 
   sft:
