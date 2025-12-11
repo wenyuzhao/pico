@@ -1,5 +1,5 @@
-# pixie train pretrain pico-100m --wandb
-# pixie train pretrain pico-100m --dry-run
+# HF_HOME=/root/.hf_cache uv run pixie train pretrain pico-100m --wandb
+# HF_HOME=/root/.hf_cache uv run pixie train pretrain pico-100m --dry-run
 import: default.yaml
 
 model:
