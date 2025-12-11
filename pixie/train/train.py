@@ -18,6 +18,7 @@ from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers import PreTrainedTokenizerBase
 from transformers.trainer_callback import TrainerCallback
 import os
+from trl.trainer.dpo_config import DPOConfig
 
 SEED = 42
 ENABLE_DATASET_CACHE = os.environ.get("DATASET_CACHE", "1").lower() in ("1", "true")
@@ -59,7 +60,7 @@ def _create_runid_and_path(
 
 def _load_one_dataset(
     dataset_config: str | DatasetConfig,
-    preprocess_fn: Any,
+    preprocess_fn: Any | None,
     filter_fn: Any | None,
     tokenizer: Any,
     max_length: int,
@@ -89,14 +90,15 @@ def _load_one_dataset(
         total_size = len(dataset)
         new_size = int(total_size * ds.ratio)
         dataset = dataset.select(range(new_size))
-    dataset = dataset.map(
-        preprocess_fn,
-        remove_columns=dataset.column_names,
-        batched=True,
-        num_proc=os.cpu_count(),
-        fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
-        load_from_cache_file=ENABLE_DATASET_CACHE,
-    )
+    if preprocess_fn is not None:
+        dataset = dataset.map(
+            preprocess_fn,
+            remove_columns=dataset.column_names,
+            batched=True,
+            num_proc=os.cpu_count(),
+            fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
+            load_from_cache_file=ENABLE_DATASET_CACHE,
+        )
     if filter_fn is not None:
         dataset = dataset.filter(
             filter_fn,
@@ -108,7 +110,7 @@ def _load_one_dataset(
 
 def _load_dataset(
     dataset_config: str | DatasetConfig | MixedDatasets | list[str | DatasetConfig],
-    preprocess_fn: Any,
+    preprocess_fn: Any | None,
     filter_fn: Any | None,
     tokenizer: Any,
     max_length: int,
@@ -318,25 +320,24 @@ def train_dpo(
     assert args is not None
     dataset = _load_dataset(
         dataset_config=args.dataset,
-        preprocess_fn=dpo.preprocess,
-        filter_fn=dpo.filter,
+        preprocess_fn=None,
+        filter_fn=None,
         tokenizer=tokenizer,
         max_length=args.max_length,
     )
     # dataset = dataset.take(100)
     training_args = _get_training_args(args, save_dir, use_wandb)
-    training_args.label_names = [
-        "rejected_loss_mask",
-        "chosen_loss_mask",
-        "chosen_input_ids",
-        "rejected_input_ids",
-    ]
+    dpo_args = DPOConfig(
+        **training_args.to_dict(),
+        max_length=args.max_length,
+        dataset_num_proc=os.cpu_count(),
+    )
     trainer = dpo.DPOTrainer(
         model=model,
         ref_model=ref_model,
-        args=training_args,
+        args=dpo_args,
         train_dataset=dataset,
-        beta=args.beta,
+        processing_class=tokenizer,
         callbacks=[ManualSaveCallback()],
     )
     trainer.train()
