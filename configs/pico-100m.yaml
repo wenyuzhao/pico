@@ -1,0 +1,20 @@
+import: default.yaml
+
+model:
+  hidden_size: 576
+  num_attention_heads: 9
+  num_kv_attention_heads: 3
+  num_hidden_layers: 24
+  feed_forward_size: 1536
+  generation:
+    max_length: 2048
+
+train:
+  pretrain:
+    dataset: EleutherAI/SmolLM2-135M-20B
+
+  sft:
+    dataset: HuggingFaceTB/smol-smoltalk
+
+  dpo:
+    dataset: openbmb/UltraFeedback
