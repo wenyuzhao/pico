@@ -1,5 +1,5 @@
-# pixie pretrain pixie-100m --wandb
-# pixie pretrain pixie-100m --dry-run
+# pixie train pretrain pico-100m --wandb
+# pixie train pretrain pico-100m --dry-run
 import: default.yaml
 
 model:
