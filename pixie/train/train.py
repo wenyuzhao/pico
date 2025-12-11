@@ -60,6 +60,7 @@ def _create_runid_and_path(
 def _load_one_dataset(
     dataset_config: str | DatasetConfig,
     preprocess_fn: Any,
+    filter_fn: Any | None,
     tokenizer: Any,
     max_length: int,
     force_no_shuffle: bool = False,
@@ -96,12 +97,19 @@ def _load_one_dataset(
         fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
         load_from_cache_file=ENABLE_DATASET_CACHE,
     )
+    if filter_fn is not None:
+        dataset = dataset.filter(
+            filter_fn,
+            num_proc=os.cpu_count(),
+            load_from_cache_file=ENABLE_DATASET_CACHE,
+        )
     return dataset
 
 
 def _load_dataset(
     dataset_config: str | DatasetConfig | MixedDatasets | list[str | DatasetConfig],
     preprocess_fn: Any,
+    filter_fn: Any | None,
     tokenizer: Any,
     max_length: int,
     is_pretrain: bool = False,
@@ -115,7 +123,9 @@ def _load_dataset(
     if not isinstance(dataset_config, MixedDatasets) and not isinstance(
         dataset_config, list
     ):
-        return _load_one_dataset(dataset_config, preprocess_fn, tokenizer, max_length)
+        return _load_one_dataset(
+            dataset_config, preprocess_fn, filter_fn, tokenizer, max_length
+        )
     # Mixed dataset
     if isinstance(dataset_config, list):
         dataset_config = MixedDatasets(datasets=dataset_config)
@@ -125,6 +135,7 @@ def _load_dataset(
         ds = _load_one_dataset(
             ds_cfg,
             preprocess_fn,
+            filter_fn,
             tokenizer,
             max_length,
             force_no_shuffle=no_shuffle,
@@ -175,6 +186,7 @@ def _get_training_args(
         # Training args
         do_train=True,
         fp16=True,
+        bf16=False,
         per_device_train_batch_size=(
             args.batch_size if args.batch_size != "auto" else 8
         ),
@@ -189,7 +201,7 @@ def _get_training_args(
         torch_compile=True,
         torch_compile_mode="default",
         half_precision_backend="cpu_amp",
-        optim="adamw_torch" if optim.name == "adamw" else "lion_32bit",
+        optim="adamw_torch_fused" if optim.name == "adamw" else "lion_32bit",
         learning_rate=optim.learning_rate,
         weight_decay=weight_decay,
         adam_beta1=betas[0],
@@ -224,6 +236,7 @@ def train_pretrain(config: Config, use_wandb: bool, dry_run: bool, project: str 
     dataset = _load_dataset(
         dataset_config=args.dataset,
         preprocess_fn=pretrain.preprocess,
+        filter_fn=None,
         tokenizer=tokenizer,
         max_length=args.max_length,
         is_pretrain=True,
@@ -265,6 +278,7 @@ def train_sft(
     dataset = _load_dataset(
         dataset_config=args.dataset,
         preprocess_fn=sft.preprocess,
+        filter_fn=sft.filter,
         tokenizer=tokenizer,
         max_length=args.max_length,
     )
@@ -305,6 +319,7 @@ def train_dpo(
     dataset = _load_dataset(
         dataset_config=args.dataset,
         preprocess_fn=dpo.preprocess,
+        filter_fn=dpo.filter,
         tokenizer=tokenizer,
         max_length=args.max_length,
     )

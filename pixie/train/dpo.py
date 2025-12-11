@@ -62,6 +62,12 @@ def preprocess(
     }
 
 
+def filter(t: dict[str, list[int]]) -> bool:
+    chosen_loss_mask = t["chosen_loss_mask"]
+    rejected_loss_mask = t["rejected_loss_mask"]
+    return sum(chosen_loss_mask) > 0 and sum(rejected_loss_mask) > 0
+
+
 # @torch.compile
 def logits_to_probs(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     # logits: [batch_size, seq_len, vocab_size]

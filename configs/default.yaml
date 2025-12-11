@@ -55,7 +55,7 @@ train:
     epochs: 2
     grad_clip: 1.0
     warmup_steps: 400
-    accumulation_steps: 10
+    accumulation_steps: 15
     optimizer:
       name: adamw
-      learning_rate: 1.0e-08
+      learning_rate: 1.0e-07

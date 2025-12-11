@@ -83,4 +83,9 @@ def preprocess(
     return {"input_ids": tokens["input_ids"], "loss_mask": tokens["assistant_masks"]}
 
 
+def filter(t: dict[str, list[int]]) -> bool:
+    loss_mask = t["loss_mask"]
+    return sum(loss_mask) > 0
+
+
 class SFTTrainer(PretrainTrainer): ...
