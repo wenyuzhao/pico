@@ -14,7 +14,7 @@ model:
 train:
   pretrain:
     save_steps: 10000
-    batch_size: 16
+    batch_size: 24
     dataset: EleutherAI/SmolLM2-135M-20B
 
   sft:
