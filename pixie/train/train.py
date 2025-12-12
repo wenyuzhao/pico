@@ -22,6 +22,12 @@ from trl.trainer.dpo_config import DPOConfig
 
 SEED = 42
 ENABLE_DATASET_CACHE = os.environ.get("DATASET_CACHE", "1").lower() in ("1", "true")
+CPU_COUNT = os.cpu_count() or 1
+if c := os.environ.get("CPU_COUNT"):
+    try:
+        CPU_COUNT = int(c)
+    except:
+        ...
 
 
 def _create_runid_and_path(
@@ -95,14 +101,14 @@ def _load_one_dataset(
             preprocess_fn,
             remove_columns=dataset.column_names,
             batched=True,
-            num_proc=os.cpu_count(),
+            num_proc=CPU_COUNT,
             fn_kwargs={"tokenizer": tokenizer, "max_length": max_length},
             load_from_cache_file=ENABLE_DATASET_CACHE,
         )
     if filter_fn is not None:
         dataset = dataset.filter(
             filter_fn,
-            num_proc=os.cpu_count(),
+            num_proc=CPU_COUNT,
             load_from_cache_file=ENABLE_DATASET_CACHE,
         )
     return dataset
@@ -181,14 +187,14 @@ def _get_training_args(
         betas = optim.betas
         eps = None
         weight_decay = optim.weight_decay
-
+    bf16 = os.environ.get("USE_BF16", "0").lower() in ("1", "true")
     return TrainingArguments(
         output_dir=model_save_dir,
         overwrite_output_dir=True,
         # Training args
         do_train=True,
-        fp16=True,
-        bf16=os.environ.get("USE_BF16", "0").lower() in ("1", "true"),
+        fp16=not bf16,
+        bf16=bf16,
         per_device_train_batch_size=(
             args.batch_size if args.batch_size != "auto" else 8
         ),
@@ -330,7 +336,7 @@ def train_dpo(
     dpo_args = DPOConfig(
         **training_args.to_dict(),
         max_length=args.max_length,
-        dataset_num_proc=os.cpu_count(),
+        dataset_num_proc=CPU_COUNT,
     )
     trainer = dpo.DPOTrainer(
         model=model,
