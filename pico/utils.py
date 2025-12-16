@@ -1,4 +1,4 @@
-from pixie.models._base import Config, ModelConfig, BaseCasualLM, MODELS
+from pico.models._base import Config, ModelConfig, BaseCasualLM, MODELS
 from pathlib import Path
 import yaml
 from typing import Any

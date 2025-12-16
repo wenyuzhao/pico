@@ -1,5 +1,5 @@
 from typing import Any, Optional, Union
-from pixie.models._base import Config
+from pico.models._base import Config
 import torch.nn.functional as F
 import torch
 from typing import cast

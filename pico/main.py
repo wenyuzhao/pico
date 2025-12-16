@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 import typer
 from .run import run_model
-from pixie.train.train import train_dpo, train_pretrain, train_sft
+from pico.train.train import train_dpo, train_pretrain, train_sft
 import warnings
 import dotenv
 from . import utils
@@ -120,7 +120,7 @@ def export_onnx(
     ckpt: Annotated[Path, typer.Argument(...)],
     task: Annotated[str, typer.Option("--task")] = "text-generation",
 ):
-    from pixie.onnx import export_onnx
+    from pico.onnx import export_onnx
 
     export_onnx(ckpt, task)
 

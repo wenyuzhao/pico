@@ -17,7 +17,7 @@ from transformers.cache_utils import Cache
 from torch.nn.attention.bias import causal_lower_right
 
 
-class PixieConfig(ModelConfig): ...
+class PicoConfig(ModelConfig): ...
 
 
 type PositionEmbedding = tuple[Tensor, Tensor]
@@ -211,7 +211,7 @@ class TransformerBlock(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, config: PixieConfig):
+    def __init__(self, config: PicoConfig):
         super().__init__()
         self.config = config
         self.hidden_size = config.hidden_size
@@ -331,16 +331,16 @@ class Transformer(nn.Module):
         return logits
 
 
-class PixiePretrainedConfig(BasePretrainedConfig):
-    model_name: str = "Pixie"
+class PicoPretrainedConfig(BasePretrainedConfig):
+    model_name: str = "Pico"
 
 
-@register_model("pixie", PixieConfig)
-class Pixie(BaseCasualLM[PixieConfig]):
-    config_class = PixiePretrainedConfig
+@register_model("pico", PicoConfig)
+class Pico(BaseCasualLM[PicoConfig]):
+    config_class = PicoPretrainedConfig
 
-    def __init__(self, config: PixieConfig | PretrainedConfig):
-        config = PixieConfig.cast(config)
+    def __init__(self, config: PicoConfig | PretrainedConfig):
+        config = PicoConfig.cast(config)
         super().__init__(config)
         self.model = Transformer(config)
 

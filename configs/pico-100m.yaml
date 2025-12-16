@@ -1,5 +1,4 @@
-# uv run pixie train pretrain pico-100m --wandb
-# uv run pixie train pretrain pico-100m --dry-run
+# uv run pico train pretrain pico-100m
 import: default.yaml
 
 model:

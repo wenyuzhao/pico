@@ -1,6 +1,6 @@
-# Pixie - Toy LLM
+# Pico - Toy LLM
 
-A toy LLM.
+A toy LLM with < 0.1B parameters.
 
 ## References
 

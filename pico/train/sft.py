@@ -1,5 +1,5 @@
 from typing import Any
-from pixie.models._base import Config
+from pico.models._base import Config
 import torch
 from typing import cast, TypedDict
 from transformers import PreTrainedTokenizerFast

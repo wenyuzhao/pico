@@ -3,8 +3,8 @@ import os, time
 import torch
 from transformers import AutoTokenizer, TrainerControl, TrainerState, TrainingArguments
 from datasets import load_dataset, Dataset, interleave_datasets, concatenate_datasets
-from pixie import utils
-from pixie.models._base import (
+from pico import utils
+from pico.models._base import (
     AdamWOptimizerConfig,
     LionOptimizerConfig,
     DatasetConfig,
@@ -12,7 +12,7 @@ from pixie.models._base import (
     Config,
     TrainingConfig,
 )
-from pixie.train import pretrain, sft, dpo
+from pico.train import pretrain, sft, dpo
 from typing import Any, override
 from transformers.models.auto.modeling_auto import AutoModelForCausalLM
 from transformers import PreTrainedTokenizerBase

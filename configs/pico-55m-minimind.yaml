@@ -1,3 +1,4 @@
+# Use datasets from Minimind2: https://github.com/jingyaogong/minimind/blob/master/README_en.md
 import: default.yaml
 
 model:

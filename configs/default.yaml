@@ -1,5 +1,5 @@
 model:
-  name: pixie
+  name: pico
   tokenizer: configs/tokenizers/lfm2
   hidden_size: 512
   num_hidden_layers: 8

@@ -1,5 +1,6 @@
+# Reproduce Minimind2: https://github.com/jingyaogong/minimind/blob/master/README_en.md
 model:
-  name: pixie
+  name: pico
   tokenizer: configs/tokenizers/minimind2
   hidden_size: 512
   num_hidden_layers: 8
