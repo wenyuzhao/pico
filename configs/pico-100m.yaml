@@ -8,16 +8,26 @@ model:
   num_hidden_layers: 24
   feed_forward_size: 1536
   generation:
-    max_length: 2048
+    max_length: 1024
 
 train:
   pretrain:
-    save_steps: 10000
-    batch_size: 24
     dataset: EleutherAI/SmolLM2-135M-20B
+    save_steps: 50000
+    accumulation_steps: 10
+    batch_size: 24
+    max_length: 1024
 
   sft:
     dataset: HuggingFaceTB/smol-smoltalk
+    accumulation_steps: 15
+    batch_size: 2
+    max_length: 1024
 
   dpo:
     dataset: openbmb/UltraFeedback
+    accumulation_steps: 30
+    batch_size: 1
+    max_length: 1024
+    optimizer:
+      learning_rate: 1.0e-06
