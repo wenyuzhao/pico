@@ -10,7 +10,9 @@ from transformers.pipelines.text_generation import TextGenerationPipeline
 REPO_ID = "wenyuzhao/pico-100m"
 SYSTEM_MESSAGE = None
 
-st.subheader("[Pico-100M](https://huggingface.co/wenyuzhao/pico-100m) Chat")
+st.html(
+    '<p><span style="font-size:1.7em; font-weight: 700"><a href="https://huggingface.co/wenyuzhao/pico-100m">Pico-100M</a> Chat</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<i><a href="https://github.com/wenyuzhao/pico">GitHub</a> | <a href="https://huggingface.co/wenyuzhao/pico-100m">HuggingFace</a></i><p>'
+)
 
 
 class Message(TypedDict):
@@ -48,6 +50,7 @@ def chat_complete_stream(
         yield cast(str, text)
 
     t.join()
+
 
 with st.spinner("Loading model ...", show_time=True):
     if "tokenizer" not in st.session_state:
