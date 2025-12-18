@@ -148,6 +148,7 @@ class BaseCasualLM[C: ModelConfig](PreTrainedModel, GenerationMixin):
         if "generation" in config_dict:
             del config_dict["generation"]
         config_dict["vocab_size"] = config.get_vocab_size()
+        del config_dict["tokenizer"]
         super().__init__(self.config_class(**config_dict))
         assert self.generation_config
         gcfg = self.args.generation
@@ -198,6 +199,32 @@ class BasePretrainedConfig(PretrainedConfig):
             "AutoModel": f"model.{self.model_name}",
             "AutoModelForCausalLM": f"model.{self.model_name}",
         }
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path,
+        cache_dir=None,
+        force_download=False,
+        local_files_only=False,
+        token=None,
+        revision: str = "main",
+        **kwargs,
+    ):
+        config = super().from_pretrained(
+            pretrained_model_name_or_path,
+            cache_dir=cache_dir,
+            force_download=force_download,
+            local_files_only=local_files_only,
+            token=token,
+            revision=revision,
+            **kwargs,
+        )
+        if isinstance(config, tuple):
+            config[0].tokenizer = pretrained_model_name_or_path
+        else:
+            config.tokenizer = pretrained_model_name_or_path
+        return config
 
 
 def register_model[T: ModelConfig](name: str, config: type[T]):
