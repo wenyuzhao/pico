@@ -174,5 +174,9 @@ def run(
     run_model(model_path, prompt, run_type)
 
 
+# Upload Model:
+# hf upload --exclude '*.bin' wenyuzhao/pico-100m out/path/to/model
+
+
 def main():
     app()
