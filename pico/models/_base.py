@@ -147,6 +147,7 @@ class BaseCasualLM[C: ModelConfig](PreTrainedModel, GenerationMixin):
         config_dict = config.model_dump()
         if "generation" in config_dict:
             del config_dict["generation"]
+        config_dict["vocab_size"] = config.get_vocab_size()
         super().__init__(self.config_class(**config_dict))
         assert self.generation_config
         gcfg = self.args.generation
